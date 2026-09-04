@@ -11,13 +11,14 @@ Scan To Pay is a single payment platform with four main user experiences:
 
 Planned technology stack:
 
-- Frontend: Next.js
-- Backend: Python
-- API: AWS API Gateway
-- Database: Supabase / PostgreSQL
-- File storage: Amazon S3
+- Frontend: Next.js (scan2pay-web)
+- Backend: Python 3.13 · FastAPI · Mangum
+- API: AWS API Gateway + Lambda (SAM)
+- Database: Supabase (PostgreSQL 16)
+- File storage: Amazon S3 (existing bucket)
 - Payment provider: Paystack
-- Messaging: WhatsApp Business API
+- SMS / OTP: WinSMS
+- Background jobs: EventBridge-triggered Lambda (no Redis, no Celery)
 
 The frontend, WhatsApp integration and other interfaces should use the same backend business logic and database.
 
@@ -1253,15 +1254,15 @@ Administrative actions affecting money, pricing or account status should be audi
 
 ## Platform
 
-- Payment sessions
+- Payment sessions (modelled as `pending` transactions — no separate session table)
 - Transactions
 - Fee calculation
 - Paystack integration
 - Paystack webhooks
 - Settlement tracking
-- Notifications
+- Notifications (future)
 - Supabase database
-- S3 file storage
+- S3 file storage (existing bucket)
 
 ---
 

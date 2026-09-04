@@ -30,16 +30,16 @@ Python 3.13 · FastAPI · Mangum · Supabase (Postgres) · Paystack · WinSMS ·
 
 ---
 
-## Phase 2 — Database
-- [ ] `database/migrations/001_enums.sql` — user_type, code_mode, txn_status, etc.
-- [ ] `database/migrations/002_plans_pricing.sql` — plans + pricing_versions seed
-- [ ] `database/migrations/003_users_merchants.sql`
-- [ ] `database/migrations/004_products_codes.sql`
-- [ ] `database/migrations/005_transactions_payouts.sql`
-- [ ] `database/migrations/006_withdrawals.sql`
-- [ ] `database/migrations/007_auth_tables.sql` — refresh_tokens, otp_codes
-- [ ] `database/migrations/008_webhooks_audit.sql`
-- [ ] Run migrations against Supabase (paste into SQL editor)
+## Phase 2 — Database ✅ Complete
+- [x] `database/migrations/001_enums.sql` — user_type, user_role, user_status, code_mode, txn_status, payment_method, settlement_state, payout_status, merchant_status, pricing_status, fee_bearer
+- [x] `database/migrations/002_plans_pricing.sql` — plans + pricing_versions + seed data (3 plans, 3 initial pricing rows)
+- [x] `database/migrations/003_users_merchants.sql` — users (role, status) + merchants
+- [x] `database/migrations/004_products_codes.sql` — products + payment_codes (constraints + indexes)
+- [x] `database/migrations/005_transactions_payouts.sql` — payouts + transactions (pricing jsonb snapshot, paid_at)
+- [x] `database/migrations/006_withdrawals.sql`
+- [x] `database/migrations/007_auth_tables.sql` — refresh_tokens, otp_codes
+- [x] `database/migrations/008_webhooks_audit.sql` — webhook_events, scan_events, audit_log
+- [ ] Run migrations against Supabase (paste into SQL editor, order 001 → 008)
 
 ---
 

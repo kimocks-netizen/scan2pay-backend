@@ -4,15 +4,17 @@
 
 | Layer | Choice |
 | --- | --- |
-| Language | Python 3.12 |
-| Framework | FastAPI |
+| Language | Python 3.13 |
+| Framework | FastAPI + Mangum (Lambda adapter) |
 | Validation | Pydantic v2 |
-| Database | PostgreSQL 16 |
-| ORM / migrations | SQLAlchemy 2.x + Alembic |
-| Cache / short-lived state | Redis (charge expiry, rate limits, idempotency) |
+| Database | Supabase (PostgreSQL 16) |
+| DB client | `supabase-py` (no ORM — raw Supabase queries) |
+| Migrations | Plain SQL files run in Supabase SQL editor |
 | Auth | JWT access token (15 min) + refresh token (30 days, rotating) |
 | Payments | Paystack |
-| Background jobs | Celery + Redis (or APScheduler if you want fewer moving parts) |
+| SMS / OTP | WinSMS |
+| Hosting | AWS Lambda + API Gateway (SAM) |
+| Background jobs | EventBridge-triggered Lambda functions (no Redis, no Celery) |
 
 ## Request flow
 
@@ -55,7 +57,7 @@ a price in the app and every printed poster is correct instantly. No reprints.
 The vendor flow the product is built around: the merchant types **one total**
 on a keypad, the API mints a throwaway code.
 
-- `single_use = true`, `expires_at = now + 5 minutes`
+- `single_use = true`, `expires_at = now + 5 minutes` (`CHARGE_TTL_MS = 300 000 ms` in the frontend constant)
 - Dies on payment (`paid_at` set, `active = false`) or on expiry
 - Never appears in the printable-codes list
 - **No inventory is captured** — we never store what was sold, only the amount
@@ -71,17 +73,21 @@ countdown in the UI is cosmetic.
 | staging | `https://api-staging.scan2pay.co.za` | test |
 | production | `https://api.scan2pay.co.za` | live |
 
-Secrets held as env vars: `DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`,
-`PAYSTACK_SECRET_KEY`, `PAYSTACK_PUBLIC_KEY`, `PAYSTACK_WEBHOOK_SECRET`.
+Secrets held in SSM Parameter Store under `/scan2pay/{env}/` and loaded at
+Lambda cold-start via `app/core/config.py` (Pydantic Settings). Local dev uses
+`.env` (gitignored). Keys: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
+`SUPABASE_ANON_KEY`, `JWT_SECRET`, `PAYSTACK_SECRET_KEY`,
+`PAYSTACK_PUBLIC_KEY`, `PAYSTACK_WEBHOOK_SECRET`, `WINSMS_API_KEY`.
 
 ## Background jobs
 
 | Job | Schedule | Does |
 | --- | --- | --- |
-| `expire_charges` | every minute | sets `active = false` on codes past `expires_at` |
+| `expire_charges` | every 1 min | sets `active = false` on codes past `expires_at` |
 | `reconcile_paystack` | every 15 min | verifies `pending` payments older than 10 min against Paystack |
 | `build_settlements` | daily 02:00 SAST | groups settled transactions into payout rows |
-| `refresh_daily_stats` | hourly | materialised per-merchant totals for the dashboard |
+
+No Redis or Celery — all scheduling is EventBridge rules in `template.yaml`.
 
 ## Cross-cutting
 
