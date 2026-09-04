@@ -1,5 +1,16 @@
 # scan2pay-backend — Build Roadmap
 
+---
+
+## ⚠️ Working Rules
+
+1. **Third-party APIs** — if unsure about the exact payload, auth format, or endpoint behaviour of any external API (WinSMS, Paystack, WhatsApp, etc.), **ask the user first**. Do not guess. The WinSMS incident (`messages[].messageText` instead of `message` + `recipients[]`) is a direct example of what happens when this rule is broken.
+2. **Unclear requirements** — if the scope of a feature is ambiguous, **ask before writing any code**. Do not assume what endpoints, fields, or behaviours are needed.
+3. **Scope** — only build what was explicitly asked for in the current session. No extra endpoints or logic that were not requested.
+4. **Existing patterns** — before implementing anything new, check how it is already done in the codebase (e.g. check PredictIQ for WinSMS format, check existing routes for DB query patterns).
+
+---
+
 ## Stack
 Python 3.13 · FastAPI · Mangum · Supabase (Postgres) · Paystack · WinSMS · AWS SAM · S3
 
