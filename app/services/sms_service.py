@@ -1,22 +1,32 @@
 import time
+import logging
 import httpx
 from app.core.config import get_settings
 
+logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
 async def send_sms(to: str, message: str) -> bool:
     """Send a single SMS via WinSMS. Returns True on success."""
     try:
-        async with httpx.AsyncClient() as client:
+        mobile = to.lstrip("+")  # WinSMS expects number without + prefix
+        async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(
                 f"{settings.winsms_api_url}/sms/outgoing/send",
                 headers={"AUTHORIZATION": settings.winsms_api_key, "Content-Type": "application/json"},
-                json={"messages": [{"clientMessageId": int(time.time() * 1000) % 2147483647, "mobileNumber": to, "messageText": message}]},
-                timeout=10,
+                json={
+                    "message": message,
+                    "recipients": [{"mobileNumber": mobile}],
+                },
             )
-        return resp.status_code == 200
-    except Exception:
+        data = resp.json()
+        accepted = resp.status_code == 200 and data.get("recipients", [{}])[0].get("accepted")
+        if not accepted:
+            logger.error("WinSMS failed: status=%s body=%s", resp.status_code, data)
+        return bool(accepted)
+    except Exception as e:
+        logger.error("WinSMS exception: %s", e)
         return False
 
 
