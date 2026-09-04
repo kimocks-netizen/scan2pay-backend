@@ -1,10 +1,10 @@
 # API reference
 
-Base URL: `https://api.scan2pay.co.za/v1`
+Base URL (dev): `https://xuwz8h1y4f.execute-api.af-south-1.amazonaws.com/Prod`
+Base URL (prod): `https://api.scan2pay.co.za/v1`
 
-All requests and responses are JSON. Authenticated endpoints send
-`Authorization: Bearer <access_token>`. Public endpoints (marked **public**) are
-what a scanning customer hits and need no token.
+> All requests and responses are JSON. Authenticated endpoints send
+> `Authorization: Bearer <access_token>`. Public endpoints (marked **public**) need no token.
 
 ## Error envelope
 
@@ -36,9 +36,9 @@ Minimum amount is **100 cents (R1.00)**; maximum is **5 000 000 cents (R50 000)*
 
 ---
 
-## 1. Auth
+## 1. Auth ✅ Live
 
-### `POST /auth/register`
+### `POST /auth/register` ✅
 
 ```json
 {
@@ -84,16 +84,18 @@ and wrong password in production; the mock distinguishes them.
 ### `POST /auth/logout` → 204. Revokes the presented refresh token.
 ### `GET /auth/me` → the `PublicUser` object above.
 
-### Phone verification (phase 2)
+### Phone verification ✅ Live
 
 - `POST /auth/otp/request` `{ "phone": "+27…" }` → 204
-- `POST /auth/otp/verify` `{ "phone": "+27…", "code": "123456" }` → token pair
+- `POST /auth/otp/verify` `{ "phone": "+27…", "code": "123456" }` → PublicUser
 
 ---
 
-## 2. Merchants
+## 2. Merchants ✅ Live
 
-### `GET /merchants/{merchantId}`
+### `GET /merchants/me` — authenticated merchant's own profile
+### `PATCH /merchants/me` — update own profile (business_name, display_name, trading_category, city, province, settlement_cycle, payout_bank, payout_bank_code, payout_account_masked)
+### `GET /merchants/{merchantId}` — public profile (id, business_name, display_name, slug, trading_category, city, status only)
 
 ```json
 {
@@ -125,17 +127,14 @@ merchant with a masked account. Never return the full account number.
 
 ---
 
-## 3. Products
-
-Only relevant to merchants who want product-linked (`fixed`) codes. Vendors
-using the till-charge flow never touch this.
+## 3. Products ✅ Live
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| `GET` | `/merchants/{id}/products` | list |
-| `POST` | `/merchants/{id}/products` | `{ name, description, priceCents, sku, category }` |
-| `PATCH` | `/products/{productId}` | any field; changing `priceCents` copies the old value into `previousPriceCents` |
-| `DELETE` | `/products/{productId}` | soft delete (`active = false`) |
+| `GET` | `/merchants/me/products` | list all |
+| `POST` | `/merchants/me/products` | `{ name, description, price_cents, sku, category }` |
+| `PATCH` | `/merchants/me/products/{id}` | any field |
+| `DELETE` | `/merchants/me/products/{id}` | hard delete |
 
 Product object:
 
@@ -148,27 +147,15 @@ Product object:
 
 ---
 
-## 4. Payment codes (permanent, printable)
+## 4. Payment codes ✅ Live
 
-### `GET /merchants/{id}/payment-codes`
-Returns the merchant's printable codes. **Excludes `singleUse` charges.**
-
-### `GET /merchants/{id}/payment-codes/primary`
-The permanent code minted at signup (`isPrimary = true`), else the oldest.
-
-### `POST /merchants/{id}/payment-codes`
-
-```json
-{ "label": "Full Car Wash", "mode": "fixed", "productId": "prd_003",
-  "amountCents": null, "placement": "Wash bay board", "description": "…",
-  "caption": "Scan to Pay" }
-```
-
-Validation: `mode=fixed` requires `productId` and `amountCents = null`;
-`mode=amount` requires `amountCents` and `productId = null`; `mode=variable`
-requires both null. Free plan is capped at 1 code → `plan_limit_reached`.
-
-### `GET /payment-codes/{id}` · `PATCH /payment-codes/{id}` (`label`, `caption`, `placement`, `active`) · `DELETE /payment-codes/{id}` (soft)
+| Method | Path | Notes |
+| --- | --- | --- |
+| `GET` | `/merchants/me/payment-codes` | list all |
+| `POST` | `/merchants/me/payment-codes` | `{ label, caption, mode, product_id, amount_cents, placement }` |
+| `PATCH` | `/merchants/me/payment-codes/{id}` | label, caption, placement, active, description |
+| `DELETE` | `/merchants/me/payment-codes/{id}` | blocked on primary code |
+| `GET` | `/pay/{reference}` | **public** — resolves QR reference → code + merchant |
 
 Payment code object:
 
@@ -183,141 +170,31 @@ Payment code object:
 
 ---
 
-## 5. Till charges (single-use)
+## 5. Till charges ✅ Live
 
-### `POST /merchants/{id}/charges`
-
+### `POST /charges` ✅
 ```json
-{ "amountCents": 4500, "note": "Groceries" }
+{ "amount_cents": 4500, "label": "Groceries", "description": "optional" }
 ```
+Creates a `single_use=true`, `mode=amount` code with `expires_at = now + 5 min`, reference `PAY-XXXXXXXX`.
 
-**201** → a payment code with `singleUse: true`, `mode: "amount"`,
-`reference: "PAY-8BEB644"`, `expiresAt = now + 5 min`, `paidAt: null`.
-`note` is a free-text label only — **we never record what was sold.**
-Errors: `amount_too_low` (400).
-
-### `GET /merchants/{id}/charges?limit=8`
-Most recent charges, newest first. Used by "Recent requests".
-
-### `GET /charges/{chargeId}`
-Polled by the merchant screen every 1.5s. Watch `paidAt` and `active`.
-
-### `POST /charges/{chargeId}/cancel`
-Sets `active = false`, `expiresAt = now`. → the updated charge.
-
-### `GET /charges/{chargeId}/events` *(optional, SSE)*
-Emits `{"status":"paid","transactionId":"txn_…"}` — replaces polling later.
+### `GET /charges/{reference}` ✅
+Returns 410 if already paid or expired.
 
 ---
 
-## 6. Resolve + pay (public, no auth)
+## 6. Resolve + pay (🔜 next session)
 
-### `GET /codes/resolve/{reference}` **public**
-
-The single endpoint a scanning phone hits. Increments `scans`.
-
-**200**
-
-```json
-{
-  "code": { "id": "pc_chg_1757…", "reference": "PAY-8BEB644", "label": "Groceries",
-            "mode": "amount", "singleUse": true, "expiresAt": "2026-09-04T11:10:00Z" },
-  "merchant": { "id": "mch_001", "displayName": "Kasi Fresh Produce", "slug": "thandis-spaza" },
-  "product": null,
-  "amountCents": 4500,
-  "expiresAt": "2026-09-04T11:10:00Z"
-}
-```
-
-`amountCents` is `null` when `mode = variable` — the customer types it.
-Return only the public merchant fields (id, displayName, slug, tradingCategory).
-Never leak payout details, phone or email here.
-Errors: `not_found` (404), `code_inactive` / `code_expired` (410).
-
-### `POST /payments/initialise` **public**
-
-```json
-{ "reference": "PAY-8BEB644", "amountCents": 4500, "method": "card", "email": "customer@example.com" }
-```
-
-Server re-resolves the code and **re-validates the amount** (must equal the
-resolved amount for `fixed`/`amount`; must be ≥ 100 cents for `variable`).
-Creates a `pending` transaction and a Paystack transaction.
-
-**201**
-
-```json
-{ "paymentId": "pay_01J…", "reference": "STP300123",
-  "authorizationUrl": "https://checkout.paystack.com/…",
-  "accessCode": "0peioxfhpn", "publicKey": "pk_live_…" }
-```
-
-Errors: `code_expired` (410), `already_paid` (409), `amount_too_low` (400).
-
-### `GET /payments/{paymentId}` **public**
-
-```json
-{ "id": "pay_01J…", "status": "pending", "transaction": null }
-```
-
-Once the webhook lands, `status` is `success` and `transaction` is a full
-transaction object (the customer's receipt).
-
-### `POST /webhooks/paystack` **public, signature-verified**
-
-Verify `x-paystack-signature` = HMAC-SHA512 of the **raw** body with
-`PAYSTACK_WEBHOOK_SECRET`, timing-safe compare, before parsing anything.
-Handled events: `charge.success`, `charge.failed`, `transfer.success`,
-`transfer.failed`. Always return 200 quickly; process idempotently by
-`paystack_reference`.
-
-On `charge.success`:
-1. mark the transaction `success`, compute fees, set `net_cents`
-2. if the code is `singleUse` → `paid_at = now`, `active = false`
-3. increment `payments` on the code
-4. write a `webhook_events` row
+### `POST /payments/initialise` — creates pending transaction + Paystack authorization URL
+### `GET /payments/{id}` — poll for status
+### `POST /webhooks/paystack` — HMAC-SHA512 verified, handles charge.success / charge.failed
 
 ---
 
-## 7. Transactions & reports
+## 7. Transactions ✅ Live
 
-### `GET /merchants/{id}/transactions`
-Query: `?from=&to=&status=&method=&codeId=&cursor=&limit=50`.
-
-```json
-{ "items": [ { "id": "txn_90000", "reference": "STP300100", "merchantId": "mch_003",
-               "paymentCodeId": "pc_008", "productId": null,
-               "item": "Taxi Fare — Soweto to Johannesburg CBD",
-               "amountCents": 2500, "platformFeeCents": 62, "providerFeeCents": 172,
-               "netCents": 2266, "status": "success", "method": "card",
-               "customerLabel": "Anonymous", "settlementStatus": "pending",
-               "createdAt": "2026-09-04T05:12:00Z" } ],
-  "nextCursor": null }
-```
-
-### `GET /merchants/{id}/stats?period=today|7d|30d|mtd`
-
-```json
-{ "grossCents": 128400, "netCents": 121030, "feesCents": 7370,
-  "count": 46, "successRate": 0.94,
-  "byDay": [ { "date": "2026-09-01", "grossCents": 18200, "count": 7 } ],
-  "byMethod": { "card": 30, "apple_pay": 9, "google_pay": 7 },
-  "topCodes": [ { "codeId": "pc_008", "label": "…", "count": 21, "grossCents": 52500 } ] }
-```
-
-### `GET /merchants/{id}/transactions.csv` → CSV export (same filters).
-
-### `GET /merchants/{id}/payouts`
-
-```json
-[ { "id": "pout_001", "merchantId": "mch_003", "amountCents": 226600,
-    "status": "paid", "bankReference": "TRF_9x…",
-    "periodStart": "2026-09-01T00:00:00Z", "periodEnd": "2026-09-02T00:00:00Z",
-    "paidAt": "2026-09-02T09:14:00Z", "transactionCount": 41 } ]
-```
-
-Taxi associations settle to the **association's** account. We do not split to
-individual drivers.
+### `GET /merchants/me/transactions?status=&limit=50&offset=0` ✅
+### `GET /merchants/me/transactions/{id}` ✅
 
 ---
 
@@ -341,7 +218,7 @@ individual drivers.
 
 ### `POST /merchants/{id}/plan` `{ "planId": "plan_basic" }` → updated merchant.
 
-### `GET /health` → `{ "status": "ok", "db": "ok", "redis": "ok" }`
+### `GET /health` → `{ "status": "ok", "db": "ok" }` ✅ live
 
 ---
 
