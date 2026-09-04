@@ -1,14 +1,7 @@
 -- seed.sql — run AFTER all migrations (001→008)
 -- Safe to re-run: uses INSERT ... ON CONFLICT DO NOTHING
 
--- ── Plans ─────────────────────────────────────────────────────────────────────
-INSERT INTO plans (id, name, description, monthly_fee_cents, platform_fee_pct, provider_fee_pct, status)
-VALUES
-  ('plan_free',  'Free',       'Get started at no cost',          0,    250, 150, 'published'),
-  ('plan_grow',  'Grow',       'For growing businesses',       49900,  175, 150, 'published'),
-  ('plan_pro',   'Pro',        'For high-volume merchants',    99900,  125, 150, 'published'),
-  ('plan_elite', 'Elite',      'Enterprise-grade',            199900,   75, 150, 'published')
-ON CONFLICT (id) DO NOTHING;
+-- ── Plans already seeded in 002_plans_pricing.sql — skip ───────────────────
 
 -- ── Test user ─────────────────────────────────────────────────────────────────
 -- password: Test1234  (bcrypt hash)

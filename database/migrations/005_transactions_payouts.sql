@@ -46,8 +46,8 @@ CREATE TABLE transactions (
   created_at           timestamptz NOT NULL DEFAULT now(),
   paid_at              timestamptz,
 
-  CONSTRAINT reference_unique UNIQUE (reference),
-  CONSTRAINT paystack_reference_unique UNIQUE (paystack_reference)
+  CONSTRAINT transactions_reference_unique UNIQUE (reference),
+  CONSTRAINT transactions_paystack_reference_unique UNIQUE (paystack_reference)
 );
 
 CREATE INDEX ON transactions (merchant_id, created_at DESC);
