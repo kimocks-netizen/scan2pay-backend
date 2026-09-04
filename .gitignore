@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.aws-sam/
+samconfig.toml
+*.egg-info/
+dist/
+.venv/
+venv/

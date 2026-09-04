@@ -1,0 +1,136 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Scan2Pay API — FastAPI on Lambda + Supabase + Paystack
+Transform:
+  - AWS::Serverless-2016-10-31
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+
+Globals:
+  Function:
+    Runtime: python3.13
+    Architectures: [x86_64]
+    MemorySize: 256
+    Timeout: 30
+    Environment:
+      Variables:
+        ENVIRONMENT: !Ref Environment
+        SUPABASE_URL: !Sub '{{resolve:ssm:/scan2pay/${Environment}/SUPABASE_URL}}'
+        SUPABASE_SERVICE_ROLE_KEY: !Sub '{{resolve:ssm:/scan2pay/${Environment}/SUPABASE_SERVICE_ROLE_KEY}}'
+        JWT_SECRET: !Sub '{{resolve:ssm:/scan2pay/${Environment}/JWT_SECRET}}'
+        WINSMS_API_KEY: !Sub '{{resolve:ssm:/scan2pay/${Environment}/WINSMS_API_KEY}}'
+        WINSMS_API_URL: https://api.winsms.co.za/api/rest/v1
+  Api:
+    Cors:
+      AllowMethods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
+      AllowHeaders: "'Content-Type,Authorization,Idempotency-Key'"
+      AllowOrigin: "'*'"
+      MaxAge: "'600'"
+
+Resources:
+
+  # ── Main API Lambda ─────────────────────────────────────────────────────────
+  Scan2PayApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.main.handler
+      CodeUri: .
+      Description: Scan2Pay FastAPI application
+      MemorySize: 512
+      Timeout: 30
+      Policies:
+        - SSMParameterReadPolicy:
+            ParameterName: !Sub 'scan2pay/${Environment}/*'
+        - S3CrudPolicy:
+            BucketName: !Ref AssetsBucket
+      Environment:
+        Variables:
+          PAYSTACK_SECRET_KEY: !Sub '{{resolve:ssm:/scan2pay/${Environment}/PAYSTACK_SECRET_KEY}}'
+          PAYSTACK_PUBLIC_KEY: !Sub '{{resolve:ssm:/scan2pay/${Environment}/PAYSTACK_PUBLIC_KEY}}'
+          PAYSTACK_WEBHOOK_SECRET: !Sub '{{resolve:ssm:/scan2pay/${Environment}/PAYSTACK_WEBHOOK_SECRET}}'
+          ASSETS_BUCKET: !Ref AssetsBucket
+      Events:
+        ApiProxy:
+          Type: Api
+          Properties:
+            Path: /{proxy+}
+            Method: ANY
+        ApiRoot:
+          Type: Api
+          Properties:
+            Path: /
+            Method: ANY
+
+  # ── Cron: expire single-use charges every minute ────────────────────────────
+  ExpireChargesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.cron.expire_charges.handler
+      CodeUri: .
+      Description: Set active=false on payment codes past expires_at
+      Timeout: 60
+      Events:
+        Schedule:
+          Type: Schedule
+          Properties:
+            Schedule: cron(* * * * ? *)
+            Description: Expire charges every minute
+
+  # ── Cron: reconcile pending Paystack payments every 15 min ─────────────────
+  ReconcilePaystackFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.cron.reconcile_paystack.handler
+      CodeUri: .
+      Description: Verify pending payments older than 10 min against Paystack
+      Timeout: 120
+      Environment:
+        Variables:
+          PAYSTACK_SECRET_KEY: !Sub '{{resolve:ssm:/scan2pay/${Environment}/PAYSTACK_SECRET_KEY}}'
+      Events:
+        Schedule:
+          Type: Schedule
+          Properties:
+            Schedule: cron(*/15 * * * ? *)
+            Description: Reconcile Paystack every 15 minutes
+
+  # ── Cron: build settlement batches daily at 02:00 SAST ─────────────────────
+  BuildSettlementsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.cron.build_settlements.handler
+      CodeUri: .
+      Description: Group settled transactions into payout rows
+      Timeout: 300
+      Events:
+        Schedule:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 0 * * ? *)
+            Description: Build settlements daily at 00:00 UTC (02:00 SAST)
+
+  # ── S3 bucket for merchant logos, QR images, receipts ──────────────────────
+  AssetsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'scan2pay-assets-${Environment}'
+      CorsConfiguration:
+        CorsRules:
+          - AllowedMethods: [GET, PUT]
+            AllowedOrigins: ['*']
+            AllowedHeaders: ['*']
+            MaxAge: 3600
+
+Conditions:
+  IsProd: !Equals [!Ref Environment, prod]
+
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/Prod/v1"
+  AssetsBucketName:
+    Description: S3 bucket for assets
+    Value: !Ref AssetsBucket
