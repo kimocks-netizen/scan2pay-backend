@@ -1,3 +1,4 @@
+import time
 import httpx
 from app.core.config import get_settings
 
@@ -11,7 +12,7 @@ async def send_sms(to: str, message: str) -> bool:
             resp = await client.post(
                 f"{settings.winsms_api_url}/sms/outgoing/send",
                 headers={"AUTHORIZATION": settings.winsms_api_key, "Content-Type": "application/json"},
-                json={"messages": [{"clientMessageId": 1, "mobileNumber": to, "messageText": message}]},
+                json={"messages": [{"clientMessageId": int(time.time() * 1000) % 2147483647, "mobileNumber": to, "messageText": message}]},
                 timeout=10,
             )
         return resp.status_code == 200
