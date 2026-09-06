@@ -130,7 +130,7 @@ Conditions:
 Outputs:
   ApiEndpoint:
     Description: API Gateway endpoint URL
-    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/Prod/v1"
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}/Prod"
   AssetsBucketName:
     Description: S3 bucket for assets
     Value: !Ref AssetsBucket

@@ -77,7 +77,7 @@ Python 3.13 · FastAPI · Mangum · Supabase (Postgres) · Paystack · WinSMS ·
 
 ## Phase 5 — Services
 - [x] `app/services/sms_service.py` — WinSMS OTP, unique clientMessageId ✅
-- [ ] `app/services/paystack_service.py` — init transaction, verify, transfer, webhook ← **next**
+- [x] `app/services/paystack_service.py` — init transaction, verify, list transactions, create recipient, initiate/finalize/fetch transfer ✅
 - [ ] `app/services/settlement_service.py` — balance calc, payout grouping
 
 ---
@@ -90,8 +90,8 @@ Python 3.13 · FastAPI · Mangum · Supabase (Postgres) · Paystack · WinSMS ·
 - [x] `app/api/routes/payment_codes.py` — GET/POST /merchants/me/payment-codes, PATCH/DELETE /{id}, GET /pay/{reference} ✅
 - [x] `app/api/routes/charges.py` — POST /charges (single-use 5-min QR), GET /charges/{reference} ✅
 - [x] `app/api/routes/transactions.py` — GET /merchants/me/transactions (filter + pagination), GET /{id} ✅
-- [ ] `app/api/routes/payments.py` — POST /payments/initialise, GET /payments/{id} ← **next**
-- [ ] `app/api/routes/webhooks.py` — Paystack webhook (HMAC-SHA512 verified) ← **next**
+- [x] `app/api/routes/payments.py` — POST /payments/initialise, GET /payments/{id} ✅
+- [x] `app/api/routes/webhooks.py` — charge.success, transfer.success/failed/reversed ✅
 - [ ] `app/api/routes/bank_accounts.py` — POST /merchants/me/bank-accounts, GET /merchants/me/bank-accounts, DELETE /{id}, PATCH /{id}/set-default
 - [ ] `app/api/routes/withdrawals.py` — balance, list, create, cancel
 - [ ] `app/api/routes/billing.py` — plans, pricing
@@ -100,9 +100,9 @@ Python 3.13 · FastAPI · Mangum · Supabase (Postgres) · Paystack · WinSMS ·
 ---
 
 ## Phase 7 — Cron Lambdas (implement)
-- [ ] `app/cron/expire_charges.py` — query `active=true AND expires_at < now()`, bulk update ← **next after payments**
-- [ ] `app/cron/reconcile_paystack.py` — verify `pending` txns > 10 min old via Paystack API
-- [ ] `app/cron/build_settlements.py` — group `success + settlement_status=pending` by merchant + cycle
+- [x] `app/cron/expire_charges.py` — bulk deactivate codes past `expires_at` ✅
+- [x] `app/cron/reconcile_paystack.py` — verify `pending` txns > 10 min old via Paystack API ✅
+- [x] `app/cron/build_settlements.py` — group last week's settled txns into payout rows per merchant ✅
 
 ---
 
@@ -140,17 +140,22 @@ Python 3.13 · FastAPI · Mangum · Supabase (Postgres) · Paystack · WinSMS ·
 
 ## Paystack Status
 - Keys: `sk_test_5007f89...` / `pk_test_23c73dd...` ✅ active
-- `POST /transaction/initialize` ✅ tested
-- `GET /transaction/verify/:ref` ✅ tested
-- `POST /transferrecipient` ✅ tested (Absa `632005` resolves correctly)
-- Webhook secret: pending — get from Paystack dashboard → Settings → API Keys
+- `POST /transaction/initialize` ✅ tested — returns `authorization_url`, `access_code`, `reference`
+- `GET /transaction/verify/:ref` ✅ tested — mixed casing: `paid_at` (snake) AND `paidAt` (camel) both present, `authorization: {}` when not paid
+- `GET /transaction?use_cursor=true&perPage=N` ✅ tested — `meta.next` is `null` when no more pages
+- `POST /transferrecipient` ✅ tested — `type` echoed as `"basa"` (not `"nuban"`), `details.account_name` is `null` in test mode
+- `POST /transfer` ⛔ blocked — `transfer_unavailable` error on starter business. Implement against prod account
+- `GET /transfer/:code` ✅ error shape confirmed — `{status: false, message, type: "validation_error", code: "invalid_params"}`
+- Webhook secret: ✅ confirmed — `PAYSTACK_SECRET_KEY` IS the HMAC key, no separate secret. Update SSM `/scan2pay/dev/PAYSTACK_WEBHOOK_SECRET` to match `PAYSTACK_SECRET_KEY`
 
 ## What's Next
-1. `app/services/paystack_service.py` — initialize, verify, create recipient
-2. `app/api/routes/payments.py` — POST /payments/initialise, GET /payments/{id}
-3. `app/api/routes/webhooks.py` — charge.success handler
-4. `app/cron/expire_charges.py` — implement
-5. Withdrawals, billing, admin routes
+1. Wire `scan2pay-web` charge page — call `POST /payments/initialise`, invoke `popup.resumeTransaction(access_code)`
+2. `expire_charges.py` cron — already implemented ✅
+3. Withdrawals, billing, admin routes
+4. **Before go-live — payment method configuration:**
+   - Apple Pay: register `scan2pay.site` via `POST /apple-pay/domain`
+   - Google Pay: enabled automatically once Paystack account is verified
+   - Capitec Pay: confirm exact channel name with Paystack support before adding to `channels` array
 
 ---
 
@@ -167,13 +172,14 @@ Python 3.13 · FastAPI · Mangum · Supabase (Postgres) · Paystack · WinSMS ·
 | Endpoint | Purpose | Confidence |
 |---|---|---|
 | `POST /transaction/initialize` | Create payment link | ✅ tested |
-| `GET /transaction/verify/:reference` | Verify after callback | ✅ tested |
-| `POST /transferrecipient` | Create payout recipient | ✅ tested |
-| `POST /transfer` | Initiate payout to merchant | ⚠️ need docs |
-| `GET /transfer/:code` | Check transfer status | ⚠️ need docs |
-| Webhook `charge.success` | Payment confirmed | ⚠️ need exact payload shape |
-| Webhook `transfer.success` | Payout confirmed | ⚠️ need exact payload shape |
-| Webhook `transfer.failed` | Payout failed | ⚠️ need exact payload shape |
+| `GET /transaction/verify/:reference` | Verify after callback | ✅ tested — full shape confirmed, mixed `paid_at`/`paidAt` casing |
+| `GET /transaction?use_cursor=true` | List transactions | ✅ tested — cursor pagination confirmed, `meta.next=null` when end |
+| `POST /transferrecipient` | Create payout recipient | ✅ tested — `type` returns `"basa"` not `"nuban"`, `account_name` is `null` in test |
+| `POST /transfer` | Initiate payout to merchant | ⛔ blocked — starter business account cannot initiate transfers. Shape documented from Paystack docs, implement and test in prod |
+| `GET /transfer/:code` | Check transfer status | ✅ error shape confirmed — `{status: false, message, type, code}` |
+| Webhook `charge.success` | Payment confirmed | ✅ shape confirmed in `06_Payments_Paystack.md` |
+| Webhook `transfer.success` | Payout confirmed | ✅ shape confirmed in `06_Payments_Paystack.md` |
+| Webhook `transfer.failed` | Payout failed | ✅ shape confirmed in `06_Payments_Paystack.md` |
 
 ### Apple Pay & Google Pay
 - **No separate integration needed** — Paystack's hosted checkout page surfaces Apple Pay / Google Pay automatically based on customer's device/browser
@@ -193,9 +199,10 @@ Python 3.13 · FastAPI · Mangum · Supabase (Postgres) · Paystack · WinSMS ·
 - Cannot delete the default account if it's the only one — must set another as default first
 - `account_number` stored masked (last 4 digits only) after Paystack resolves it
 
-### Docs to Share at Start of Session
-- [ ] Paystack webhook payload — `charge.success` exact field names
-- [ ] `POST /transfer` — exact payload (amount in kobo/cents? recipient_code? reason field?)
-- [ ] `POST /transferrecipient` — confirm response shape (we tested it but note exact fields returned)
-- [ ] Transfer OTP flow — does test account require OTP confirmation?
-- [ ] Confirm: hosted redirect vs Paystack Inline JS for payment page
+### All Blockers Resolved ✅
+- Webhook secret = `PAYSTACK_SECRET_KEY` (no separate secret)
+- `callback_url` = `https://scan2pay.site/charge?paid=true`
+- Transfer OTP = enabled by default, `DEV_TRANSFER_OTP=False` skips finalize in dev
+- Payment method = Paystack Inline JS (`popup.resumeTransaction(access_code)`)
+- All API shapes confirmed and documented in `06_Payments_Paystack.md`
+- `POST /transfer` blocked on starter account — implement and test against prod account only

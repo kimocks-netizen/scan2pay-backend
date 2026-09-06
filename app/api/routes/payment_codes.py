@@ -1,5 +1,5 @@
 import secrets
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.core.deps import get_current_user_id
@@ -42,10 +42,19 @@ def _make_id(db) -> str:
 
 
 @router.get("/merchants/me/payment-codes")
-async def list_codes(user_id: str = Depends(get_current_user_id)):
+async def list_codes(
+    single_use: str | None = None,
+    limit: int | None = None,
+    user_id: str = Depends(get_current_user_id),
+):
     db = get_db()
     mid = _merchant_id(user_id, db)
-    res = db.table("payment_codes").select("*").eq("merchant_id", mid).order("created_at", desc=True).execute()
+    q = db.table("payment_codes").select("*").eq("merchant_id", mid).order("created_at", desc=True)
+    if single_use is not None:
+        q = q.eq("single_use", single_use.lower() == "true")
+    if limit is not None:
+        q = q.limit(limit)
+    res = q.execute()
     return res.data
 
 

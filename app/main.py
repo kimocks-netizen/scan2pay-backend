@@ -1,7 +1,11 @@
 import logging
+import sys
+import traceback
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from mangum import Mangum
 
 from app.core.config import get_settings
@@ -13,6 +17,7 @@ from app.api.routes import (
 )
 
 logging.basicConfig(level=logging.INFO)
+logging.getLogger().setLevel(logging.INFO)  # force root logger level in Lambda
 logger = logging.getLogger()
 
 settings = get_settings()
@@ -31,6 +36,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Global exception handler — logs true unhandled exceptions to CloudWatch ──
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    if isinstance(exc, HTTPException):
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    if isinstance(exc, RequestValidationError):
+        sys.stderr.write(f"VALIDATION ERROR {request.method} {request.url.path}: {exc.errors()}\n")
+        sys.stderr.flush()
+        return JSONResponse(status_code=422, content={"detail": exc.errors()})
+    tb = traceback.format_exc()
+    sys.stderr.write(f"UNHANDLED {request.method} {request.url.path}\n{tb}\n")
+    sys.stderr.flush()
+    return JSONResponse(status_code=500, content={"detail": {"code": "unknown", "message": "An error occurred"}})
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 app.include_router(health.router,        prefix="/health",       tags=["Health"])

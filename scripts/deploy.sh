@@ -44,32 +44,24 @@ set -a; source "$ENV_FILE"; set +a
 # ── Push SSM parameters ───────────────────────────────────────────────────────
 info "Syncing SSM parameters to /scan2pay/$ENV/..."
 
-declare -A PARAMS=(
-  [SUPABASE_URL]="$SUPABASE_URL"
-  [SUPABASE_SERVICE_ROLE_KEY]="$SUPABASE_SERVICE_ROLE_KEY"
-  [JWT_SECRET]="$JWT_SECRET"
-  [WINSMS_API_KEY]="$WINSMS_API_KEY"
-  [PAYSTACK_SECRET_KEY]="$PAYSTACK_SECRET_KEY"
-  [PAYSTACK_PUBLIC_KEY]="$PAYSTACK_PUBLIC_KEY"
-  [PAYSTACK_WEBHOOK_SECRET]="$PAYSTACK_WEBHOOK_SECRET"
-)
-
-for NAME in "${!PARAMS[@]}"; do
-  VALUE="${PARAMS[$NAME]}"
-  if [ -z "$VALUE" ]; then
-    warn "Skipping $NAME — not set in .env"
-    continue
-  fi
+ssm_put() {
+  local NAME="$1" VALUE="$2"
+  if [ -z "$VALUE" ]; then warn "Skipping $NAME — not set in .env"; return; fi
   aws ssm put-parameter \
-    --profile "$PROFILE" \
-    --region "$REGION" \
+    --profile "$PROFILE" --region "$REGION" \
     --name "/scan2pay/$ENV/$NAME" \
     --value "$VALUE" \
-    --type String \
-    --overwrite \
-    --output text > /dev/null
+    --type String --overwrite --output text > /dev/null
   success "SSM /scan2pay/$ENV/$NAME"
-done
+}
+
+ssm_put SUPABASE_URL              "${SUPABASE_URL:-}"
+ssm_put SUPABASE_SERVICE_ROLE_KEY "${SUPABASE_SERVICE_ROLE_KEY:-}"
+ssm_put JWT_SECRET                "${JWT_SECRET:-}"
+ssm_put WINSMS_API_KEY            "${WINSMS_API_KEY:-}"
+ssm_put PAYSTACK_SECRET_KEY       "${PAYSTACK_SECRET_KEY:-}"
+ssm_put PAYSTACK_PUBLIC_KEY       "${PAYSTACK_PUBLIC_KEY:-}"
+ssm_put PAYSTACK_WEBHOOK_SECRET   "${PAYSTACK_WEBHOOK_SECRET:-}"
 
 # ── SAM build ─────────────────────────────────────────────────────────────────
 info "Building..."
@@ -98,3 +90,6 @@ echo -e "  ${CYAN}API:${NC} $API_URL"
 echo -e "  ${CYAN}Health:${NC} $(curl -s "$API_URL/health" 2>/dev/null || echo 'check manually')"
 echo ""
 warn "Update scan2pay-web/.env → NEXT_PUBLIC_API_URL=$API_URL"
+
+
+# bash scripts/deploy.sh
