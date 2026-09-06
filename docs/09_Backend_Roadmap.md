@@ -50,6 +50,7 @@ Python 3.13 · FastAPI · Mangum · Supabase (Postgres) · Paystack · WinSMS ·
 - [x] `database/migrations/006_withdrawals.sql`
 - [x] `database/migrations/007_auth_tables.sql` — refresh_tokens, otp_codes
 - [x] `database/migrations/008_webhooks_audit.sql` — webhook_events, scan_events, audit_log
+- [ ] `database/migrations/009_merchant_bank_accounts.sql` — merchant_bank_accounts (id, merchant_id, recipient_code, bank_name, account_number masked, account_name, is_default, created_at) ← **needed for withdrawals**
 - [x] All migrations run against Supabase ✅
 - [x] `database/migrations/seed.sql` — plans already in 002; test user, merchant, products, payment codes, transactions seeded ✅
 
@@ -63,6 +64,7 @@ Python 3.13 · FastAPI · Mangum · Supabase (Postgres) · Paystack · WinSMS ·
 - [ ] `app/schemas/charge.py` — inline in route (ChargeCreate)
 - [ ] `app/schemas/payment.py` — PaymentInitRequest, PaymentInitResponse, PaymentOut
 - [ ] `app/schemas/transaction.py` — TransactionOut, TransactionList
+- [ ] `app/schemas/bank_account.py` — BankAccountCreate, BankAccountOut
 - [ ] `app/schemas/withdrawal.py` — WithdrawalCreate, WithdrawalOut
 - [ ] `app/schemas/admin.py` — AdminStats, SettlementRow, PricingVersionCreate
 
@@ -90,6 +92,7 @@ Python 3.13 · FastAPI · Mangum · Supabase (Postgres) · Paystack · WinSMS ·
 - [x] `app/api/routes/transactions.py` — GET /merchants/me/transactions (filter + pagination), GET /{id} ✅
 - [ ] `app/api/routes/payments.py` — POST /payments/initialise, GET /payments/{id} ← **next**
 - [ ] `app/api/routes/webhooks.py` — Paystack webhook (HMAC-SHA512 verified) ← **next**
+- [ ] `app/api/routes/bank_accounts.py` — POST /merchants/me/bank-accounts, GET /merchants/me/bank-accounts, DELETE /{id}, PATCH /{id}/set-default
 - [ ] `app/api/routes/withdrawals.py` — balance, list, create, cancel
 - [ ] `app/api/routes/billing.py` — plans, pricing
 - [ ] `app/api/routes/admin.py` — all admin endpoints
@@ -148,3 +151,51 @@ Python 3.13 · FastAPI · Mangum · Supabase (Postgres) · Paystack · WinSMS ·
 3. `app/api/routes/webhooks.py` — charge.success handler
 4. `app/cron/expire_charges.py` — implement
 5. Withdrawals, billing, admin routes
+
+---
+
+## Tomorrow's Session — Paystack Integration Plan
+
+### Payment Flow
+1. Customer scans QR → app calls `POST /payments/initialise`
+2. Backend calls Paystack `POST /transaction/initialize` → returns `authorization_url`
+3. Customer is redirected to Paystack hosted page (handles **card, Apple Pay, Google Pay** automatically — no separate APIs needed)
+4. Paystack fires `charge.success` webhook → backend verifies HMAC-SHA512, marks transaction `success`
+5. Merchant gets notified (SMS / push)
+
+### Paystack APIs Needed
+| Endpoint | Purpose | Confidence |
+|---|---|---|
+| `POST /transaction/initialize` | Create payment link | ✅ tested |
+| `GET /transaction/verify/:reference` | Verify after callback | ✅ tested |
+| `POST /transferrecipient` | Create payout recipient | ✅ tested |
+| `POST /transfer` | Initiate payout to merchant | ⚠️ need docs |
+| `GET /transfer/:code` | Check transfer status | ⚠️ need docs |
+| Webhook `charge.success` | Payment confirmed | ⚠️ need exact payload shape |
+| Webhook `transfer.success` | Payout confirmed | ⚠️ need exact payload shape |
+| Webhook `transfer.failed` | Payout failed | ⚠️ need exact payload shape |
+
+### Apple Pay & Google Pay
+- **No separate integration needed** — Paystack's hosted checkout page surfaces Apple Pay / Google Pay automatically based on customer's device/browser
+- The `authorization_url` from `POST /transaction/initialize` is all we need
+- Decision needed: **hosted page** (redirect) vs **Paystack Inline** (custom page, more control) — confirm before building
+
+### Merchant Bank Accounts & Withdrawal Flow
+1. Merchant adds bank account → `POST /merchants/me/bank-accounts` (bank_name + account_number)
+2. Backend calls Paystack `POST /transferrecipient` → validates account, returns `recipient_code`
+3. Store in `merchant_bank_accounts` table — first account auto-set as `is_default`
+4. Merchant can add more accounts and switch default via `PATCH /{id}/set-default`
+5. On withdrawal request → use `is_default` account's `recipient_code` with `POST /transfer`
+
+**Rules:**
+- Multiple accounts allowed, one `is_default = true` at a time
+- Switching default flips previous default to `false`
+- Cannot delete the default account if it's the only one — must set another as default first
+- `account_number` stored masked (last 4 digits only) after Paystack resolves it
+
+### Docs to Share at Start of Session
+- [ ] Paystack webhook payload — `charge.success` exact field names
+- [ ] `POST /transfer` — exact payload (amount in kobo/cents? recipient_code? reason field?)
+- [ ] `POST /transferrecipient` — confirm response shape (we tested it but note exact fields returned)
+- [ ] Transfer OTP flow — does test account require OTP confirmation?
+- [ ] Confirm: hosted redirect vs Paystack Inline JS for payment page

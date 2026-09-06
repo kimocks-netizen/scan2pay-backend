@@ -5,7 +5,7 @@
 
 -- ── Test user ─────────────────────────────────────────────────────────────────
 -- password: Test1234  (bcrypt hash)
-INSERT INTO users (id, full_name, phone, email, password_hash, user_type, role, status, avatar_initials, phone_verified, email_verified)
+INSERT INTO users (id, full_name, phone, email, password_hash, user_type, status, avatar_initials, phone_verified, email_verified)
 VALUES (
   'usr_001',
   'Demo Merchant',
@@ -13,12 +13,15 @@ VALUES (
   'demo@scan2pay.co.za',
   '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMlJbekRSm6E6YkFqhZ9Aq5K2.',
   'vendor',
-  'merchant',
   'active',
   'DM',
   true,
   false
 ) ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO user_roles (id, user_id, role)
+VALUES ('ur_001', 'usr_001', 'merchant')
+ON CONFLICT DO NOTHING;
 
 -- ── Test merchant ─────────────────────────────────────────────────────────────
 INSERT INTO merchants (id, user_id, business_name, display_name, slug, trading_category, city, province, plan_id, settlement_cycle, status)

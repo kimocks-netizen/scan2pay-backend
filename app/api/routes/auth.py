@@ -37,14 +37,19 @@ OTP_MAX_ATTEMPTS = 5
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
-def _user_to_public(row: dict, merchant_id: str | None = None) -> PublicUser:
+def _get_role(user_id: str, db) -> str:
+    res = db.table("user_roles").select("role").eq("user_id", user_id).order("created_at").limit(1).execute()
+    return res.data[0]["role"] if res.data else "merchant"
+
+
+def _user_to_public(row: dict, db, merchant_id: str | None = None) -> PublicUser:
     return PublicUser(
         id=row["id"],
         full_name=row["full_name"],
         phone=row["phone"],
         email=row.get("email"),
-        user_type=row["user_type"],
-        role=row.get("role", "merchant"),
+        user_type=row.get("user_type"),
+        role=_get_role(row["id"], db),
         status=row.get("status", "active"),
         merchant_id=merchant_id or row.get("merchant_id"),
         avatar_initials=row.get("avatar_initials"),
@@ -56,7 +61,7 @@ def _user_to_public(row: dict, merchant_id: str | None = None) -> PublicUser:
 
 def _make_id(prefix: str, db) -> str:
     """Generate a short sequential-style ID by counting existing rows."""
-    table = {"usr": "users", "mch": "merchants", "pc": "payment_codes", "rt": "refresh_tokens", "otp": "otp_codes"}.get(prefix, prefix)
+    table = {"usr": "users", "mch": "merchants", "pc": "payment_codes", "rt": "refresh_tokens", "otp": "otp_codes", "ur": "user_roles"}.get(prefix, prefix)
     try:
         res = db.table(table).select("id", count="exact").execute()
         n = (res.count or 0) + 1
@@ -94,8 +99,13 @@ async def _issue_tokens(user_id: str, db, request: Request | None = None) -> tup
     return access, refresh
 
 
+# TODO: remove DEV_OTP_BYPASS once WinSMS credits are topped up
+DEV_OTP_BYPASS = True
+DEV_OTP_CODE = "0000"
+
+
 async def _send_otp_to(phone: str, db) -> None:
-    code = "".join(random.choices(string.digits, k=6))
+    code = DEV_OTP_CODE if DEV_OTP_BYPASS else "".join(random.choices(string.digits, k=6))
     otp_id = _make_id("otp", db)
     expires = datetime.now(timezone.utc) + timedelta(minutes=OTP_TTL_MINUTES)
     db.table("otp_codes").insert({
@@ -104,6 +114,9 @@ async def _send_otp_to(phone: str, db) -> None:
         "code_hash": hash_token(code),
         "expires_at": expires.isoformat(),
     }).execute()
+    if DEV_OTP_BYPASS:
+        logger.warning("DEV_OTP_BYPASS active — OTP for %s is 0000, no SMS sent", phone)
+        return
     sent = await send_otp(phone, code)
     if not sent:
         logger.warning("WinSMS delivery failed for %s", phone)
@@ -131,6 +144,8 @@ async def register(body: RegisterRequest, request: Request):
     pc_id = _make_id("pc", db)
     reference = "QR-" + secrets.token_hex(4).upper()
 
+    ur_id = _make_id("ur", db)
+
     # insert user
     db.table("users").insert({
         "id": user_id,
@@ -139,12 +154,14 @@ async def register(body: RegisterRequest, request: Request):
         "email": body.email.strip().lower() if body.email else None,
         "password_hash": hash_password(body.password),
         "user_type": body.user_type,
-        "role": "merchant",
         "status": "active",
         "avatar_initials": _avatar(body.full_name),
         "phone_verified": False,
         "email_verified": False,
     }).execute()
+
+    # insert role
+    db.table("user_roles").insert({"id": ur_id, "user_id": user_id, "role": "merchant"}).execute()
 
     # insert merchant
     slug = user_id  # simple unique slug; can be prettified later
@@ -182,7 +199,7 @@ async def register(body: RegisterRequest, request: Request):
 
     user_row = db.table("users").select("*").eq("id", user_id).single().execute().data
     return AuthResponse(
-        user=_user_to_public(user_row, merchant_id=merchant_id),
+        user=_user_to_public(user_row, db, merchant_id=merchant_id),
         access_token=access,
         refresh_token=refresh,
     )
@@ -225,7 +242,7 @@ async def login(body: LoginRequest, request: Request):
     access, refresh = await _issue_tokens(user["id"], db, request)
 
     return AuthResponse(
-        user=_user_to_public(user, merchant_id=merchant_id),
+        user=_user_to_public(user, db, merchant_id=merchant_id),
         access_token=access,
         refresh_token=refresh,
     )
@@ -255,7 +272,7 @@ async def refresh_tokens(body: RefreshRequest, request: Request):
 
     access, new_refresh = await _issue_tokens(user_id, db, request)
     return AuthResponse(
-        user=_user_to_public(user, merchant_id=merchant_id),
+        user=_user_to_public(user, db, merchant_id=merchant_id),
         access_token=access,
         refresh_token=new_refresh,
     )
@@ -280,7 +297,7 @@ async def me(user_id: str = Depends(get_current_user_id)):
         raise HTTPException(status_code=404, detail={"code": "not_found", "message": "User not found."})
     mch = db.table("merchants").select("id").eq("user_id", user_id).execute()
     merchant_id = mch.data[0]["id"] if mch.data else None
-    return _user_to_public(user, merchant_id=merchant_id)
+    return _user_to_public(user, db, merchant_id=merchant_id)
 
 
 # ── OTP request ───────────────────────────────────────────────────────────────

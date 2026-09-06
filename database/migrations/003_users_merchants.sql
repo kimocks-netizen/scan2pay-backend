@@ -7,8 +7,7 @@ CREATE TABLE users (
   phone            text NOT NULL,
   email            citext,
   password_hash    text NOT NULL,
-  user_type        user_type NOT NULL,
-  role             user_role NOT NULL DEFAULT 'merchant',
+  user_type        user_type,                       -- NULL for admin/staff users
   status           user_status NOT NULL DEFAULT 'active',
   avatar_initials  text,
   phone_verified   boolean NOT NULL DEFAULT false,
@@ -21,6 +20,18 @@ CREATE TABLE users (
 );
 
 CREATE INDEX ON users (lower(email::text));
+
+-- ── user_roles ────────────────────────────────────────────────────────────────
+-- One row per role per user. Roles: merchant | admin | support
+CREATE TABLE user_roles (
+  id         text PRIMARY KEY,
+  user_id    text NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role       text NOT NULL CHECK (role IN ('merchant', 'admin', 'support')),
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT user_roles_user_role_unique UNIQUE (user_id, role)
+);
+
+CREATE INDEX ON user_roles (user_id);
 
 -- ── merchants ─────────────────────────────────────────────────────────────────
 CREATE TABLE merchants (
@@ -35,8 +46,8 @@ CREATE TABLE merchants (
   plan_id                  text NOT NULL REFERENCES plans(id) DEFAULT 'plan_free',
   payout_bank              text,
   payout_bank_code         text,
-  payout_account_masked    text,                   -- last 4 digits shown in UI
-  payout_account_enc       bytea,                  -- full number, encrypted at rest
+  payout_account_masked    text,
+  payout_account_enc       bytea,
   paystack_recipient_code  text,
   settlement_cycle         text NOT NULL DEFAULT 'Weekly',
   status                   merchant_status NOT NULL DEFAULT 'active',

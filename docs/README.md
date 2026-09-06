@@ -2,6 +2,19 @@
 
 Central reference for the entire Scan2Pay platform.
 
+---
+
+## ⚠️ AI Assistant Rules (read before every session)
+
+1. **Third-party APIs** — if unsure about the exact payload structure, authentication format, or endpoint behaviour of any external API (WinSMS, Paystack, WhatsApp, etc.), **ask the user first**. Do not guess or invent a format. The WinSMS incident (wrong payload — `messages[].messageText` instead of `message` + `recipients[]`) is a direct example of what happens when this rule is broken.
+
+2. **What to build** — if the requirement is ambiguous or the scope of a feature is unclear, **ask before writing any code**. Do not assume what endpoints, fields, or behaviours are needed. A one-line question saves more time than rewriting the wrong implementation.
+
+3. **Scope creep** — only build what was explicitly asked for in the current session. Do not add extra endpoints, fields, or logic that were not requested.
+
+4. **Existing patterns** — before implementing anything new, check how it is already done in the codebase (e.g. check PredictIQ for WinSMS, check existing routes for DB query patterns). Prefer consistency over novelty.
+
+---
 ## Documents
 
 | # | File | Contents |

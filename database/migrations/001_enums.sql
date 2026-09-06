@@ -2,7 +2,6 @@
 -- Run first — all other migrations depend on these types.
 
 CREATE TYPE user_type        AS ENUM ('vendor', 'tip', 'taxi');
-CREATE TYPE user_role        AS ENUM ('merchant', 'admin');
 CREATE TYPE user_status      AS ENUM ('active', 'suspended');
 CREATE TYPE code_mode        AS ENUM ('fixed', 'amount', 'variable');
 CREATE TYPE txn_status       AS ENUM ('pending', 'success', 'failed');

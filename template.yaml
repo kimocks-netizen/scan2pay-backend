@@ -116,7 +116,7 @@ Resources:
   AssetsBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub 'scan2pay-assets-${Environment}'
+      BucketName: !Sub 'scan2pay-assets-${Environment}-${AWS::AccountId}'
       CorsConfiguration:
         CorsRules:
           - AllowedMethods: [GET, PUT]

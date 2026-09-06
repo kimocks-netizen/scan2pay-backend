@@ -76,7 +76,7 @@ class PublicUser(BaseModel):
     full_name: str
     phone: str
     email: str | None
-    user_type: str
+    user_type: str | None
     role: str
     status: str
     merchant_id: str | None

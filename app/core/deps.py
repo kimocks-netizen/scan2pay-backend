@@ -2,6 +2,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from app.core.security import decode_token
+from app.db.connection import get_db
 
 bearer = HTTPBearer()
 
@@ -15,5 +16,8 @@ def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depends(bear
 
 
 def require_admin(user_id: str = Depends(get_current_user_id)) -> str:
-    # Role check is done inside the route against the DB; this just ensures a token exists.
+    db = get_db()
+    res = db.table("user_roles").select("role").eq("user_id", user_id).eq("role", "admin").execute()
+    if not res.data:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
     return user_id
