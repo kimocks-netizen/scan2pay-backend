@@ -1,6 +1,5 @@
 import logging
 import secrets
-import sys
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -39,11 +38,13 @@ def _calc_fees(amount_cents: int, plan_percent: float) -> tuple[int, int, int]:
 
 
 def _make_txn_id(db) -> str:
+    import secrets
+    rand = secrets.token_hex(3).upper()
     try:
         n = (db.table("transactions").select("id", count="exact").execute().count or 0) + 1
     except Exception:
-        n = int(secrets.token_hex(3), 16) % 100000
-    return f"txn_{str(n).zfill(6)}"
+        n = int(rand, 16) % 100000
+    return f"txn_{str(n).zfill(6)}{rand}"
 
 
 @router.post("/initialise", status_code=201)
@@ -63,6 +64,11 @@ async def initialise_payment(body: PaymentInitRequest, user_id: str = Depends(ge
     # resolve amount
     if pc["mode"] == "amount":
         amount_cents = pc["amount_cents"]
+    elif pc["mode"] == "fixed" and pc.get("product_id"):
+        pr = db.table("products").select("price_cents").eq("id", pc["product_id"]).execute()
+        if not pr.data:
+            raise HTTPException(status_code=404, detail={"code": "not_found", "message": "Product not found."})
+        amount_cents = pr.data[0]["price_cents"]
     elif body.amount_cents:
         amount_cents = body.amount_cents
     else:
@@ -88,8 +94,6 @@ async def initialise_payment(body: PaymentInitRequest, user_id: str = Depends(ge
     email = body.customer_email or "anonymous@scan2pay.co.za"
 
     # persist pending transaction BEFORE calling Paystack
-    sys.stderr.write(f"[payments] Inserting pending txn {txn_id} for merchant {mid}\n")
-    sys.stderr.flush()
     logger.info("Inserting pending txn %s for merchant %s", txn_id, mid)
     db.table("transactions").insert({
         "id": txn_id,

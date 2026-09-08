@@ -19,6 +19,7 @@ async def list_transactions(
     method: str | None = Query(None),
     q: str | None = Query(None),
     single_use: str | None = Query(None),
+    charge_session: str | None = Query(None),
     limit: int = Query(10, ge=1, le=200),
     offset: int = Query(0, ge=0),
     user_id: str = Depends(get_current_user_id),
@@ -26,7 +27,6 @@ async def list_transactions(
     db = get_db()
     mid = _merchant_id(user_id, db)
 
-    # count query (no limit/offset)
     count_q = db.table("transactions").select("id", count="exact").eq("merchant_id", mid)
     data_q = db.table("transactions").select("*").eq("merchant_id", mid).order("created_at", desc=True).limit(limit).offset(offset)
 
@@ -36,10 +36,12 @@ async def list_transactions(
     if method:
         count_q = count_q.eq("method", method)
         data_q = data_q.eq("method", method)
+    if charge_session is not None:
+        is_charge = charge_session.lower() == "true"
+        count_q = count_q.eq("charge_session", is_charge)
+        data_q = data_q.eq("charge_session", is_charge)
     if single_use is not None:
         is_single = single_use.lower() == "true"
-        # join through payment_codes to filter single_use
-        # simpler: fetch payment_code_ids that are single_use then filter
         pc_res = db.table("payment_codes").select("id").eq("merchant_id", mid).eq("single_use", is_single).execute()
         pc_ids = [r["id"] for r in pc_res.data]
         if not pc_ids:
@@ -48,7 +50,6 @@ async def list_transactions(
         data_q = data_q.in_("payment_code_id", pc_ids)
     if q:
         term = f"%{q}%"
-        # Supabase JS SDK doesn't support OR across columns easily; use ilike on reference
         data_q = data_q.ilike("reference", term)
         count_q = count_q.ilike("reference", term)
 

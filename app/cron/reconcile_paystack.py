@@ -45,8 +45,10 @@ def handler(event, context):
                 db.table("transactions").update(updates).eq("id", txn["id"]).execute()
 
                 metadata = data.get("metadata") or {}
-                if metadata.get("single_use"):
-                    db.table("payment_codes").update({"active": False}).eq("id", txn["payment_code_id"]).execute()
+                single_use_val = metadata.get("single_use")
+                if single_use_val in (True, "true", "True", 1):
+                    now = datetime.now(timezone.utc).isoformat()
+                    db.table("payment_codes").update({"active": False, "paid_at": now}).eq("id", txn["payment_code_id"]).execute()
 
                 results["verified"] += 1
                 logger.info("reconcile: marked success txn=%s ref=%s", txn["id"], ref)
