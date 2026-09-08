@@ -8,7 +8,7 @@
 
 | Name         | Phone        | Password  | user_type | user_id   | merchant_id | Primary QR     |
 |--------------|--------------|-----------|-----------|-----------|-------------|----------------|
-| Demo Merchant| 0821000001   | (see DB)  | vendor    | usr_001   | mch_001     | QR-DEMO0001    |
+| Demo Merchant| 0821000001   | Vendor1234! | vendor  | usr_001   | mch_001     | QR-DEMO0001    |
 | Tip Tester   | 0660404333   | 123456    | tip       | usr_004   | mch_003     | QR-BA5ECDB1    |
 
 ## Staff Accounts

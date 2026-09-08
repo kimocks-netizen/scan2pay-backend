@@ -32,20 +32,16 @@ def _merchant_id(user_id: str, db) -> str:
     return res.data[0]["id"]
 
 
-def _make_product_id(db) -> str:
-    try:
-        n = (db.table("products").select("id", count="exact").execute().count or 0) + 1
-    except Exception:
-        n = int(secrets.token_hex(3), 16) % 100000
-    return f"prd_{str(n).zfill(3)}"
+def _make_product_id() -> str:
+    return "prd_" + secrets.token_hex(5)
 
 
-def _make_code_id(db) -> str:
-    try:
-        n = (db.table("payment_codes").select("id", count="exact").execute().count or 0) + 1
-    except Exception:
-        n = int(secrets.token_hex(3), 16) % 100000
-    return f"pc_{str(n).zfill(3)}"
+def _make_code_id() -> str:
+    return "pc_" + secrets.token_hex(5)
+
+
+def _make_qr_reference() -> str:
+    return "PRD-" + secrets.token_hex(4).upper()
 
 
 @router.get("/merchants/me/products")
@@ -69,7 +65,7 @@ async def list_products(user_id: str = Depends(get_current_user_id)):
 async def create_product(body: ProductCreate, user_id: str = Depends(get_current_user_id)):
     db = get_db()
     mid = _merchant_id(user_id, db)
-    pid = _make_product_id(db)
+    pid = _make_product_id()
 
     # create product
     prod_res = db.table("products").insert({
@@ -83,27 +79,67 @@ async def create_product(body: ProductCreate, user_id: str = Depends(get_current
         "category": body.category,
         "active": True,
     }).execute()
+
+    if not prod_res.data:
+        raise HTTPException(status_code=500, detail={"code": "insert_failed", "message": "Product insert failed."})
     product = prod_res.data[0]
 
     # auto-create a permanent fixed-mode payment code for this product
-    pc_id = _make_code_id(db)
-    reference = "PRD-" + secrets.token_hex(4).upper()
+    reference = _make_qr_reference()
+    try:
+        db.table("payment_codes").insert({
+            "id": _make_code_id(),
+            "merchant_id": mid,
+            "reference": reference,
+            "label": body.name,
+            "caption": body.name,
+            "mode": "fixed",
+            "product_id": pid,
+            "active": True,
+            "is_primary": False,
+            "single_use": False,
+            "scans": 0,
+            "payments": 0,
+        }).execute()
+    except Exception as e:
+        # roll back the product so we never have an orphan without a QR
+        db.table("products").delete().eq("id", pid).execute()
+        raise HTTPException(status_code=500, detail={"code": "qr_failed", "message": f"Could not create QR code: {e}"})
+
+    product["qr_reference"] = reference
+    return product
+
+
+@router.post("/merchants/me/products/{product_id}/backfill-qr", status_code=200)
+async def backfill_qr(product_id: str, user_id: str = Depends(get_current_user_id)):
+    """Creates a QR code for a product that was orphaned without one."""
+    db = get_db()
+    mid = _merchant_id(user_id, db)
+    existing = db.table("products").select("*").eq("id", product_id).eq("merchant_id", mid).execute()
+    if not existing.data:
+        raise HTTPException(status_code=404, detail={"code": "not_found", "message": "Product not found."})
+    # check if a code already exists
+    code_check = db.table("payment_codes").select("reference").eq("product_id", product_id).execute()
+    if code_check.data:
+        product = existing.data[0]
+        product["qr_reference"] = code_check.data[0]["reference"]
+        return product
+    reference = _make_qr_reference()
     db.table("payment_codes").insert({
-        "id": pc_id,
+        "id": _make_code_id(),
         "merchant_id": mid,
         "reference": reference,
-        "label": body.name,
-        "caption": body.name,
+        "label": existing.data[0]["name"],
+        "caption": existing.data[0]["name"],
         "mode": "fixed",
-        "product_id": pid,
-        "amount_cents": None,   # fixed mode — price comes from product at scan time
+        "product_id": product_id,
         "active": True,
         "is_primary": False,
         "single_use": False,
         "scans": 0,
         "payments": 0,
     }).execute()
-
+    product = existing.data[0]
     product["qr_reference"] = reference
     return product
 
@@ -151,3 +187,18 @@ async def delete_product(product_id: str, user_id: str = Depends(get_current_use
     # deactivate payment code (don't delete — preserves transaction history)
     db.table("payment_codes").update({"active": False}).eq("product_id", product_id).execute()
     db.table("products").delete().eq("id", product_id).execute()
+
+
+@router.post("/merchants/me/products/{product_id}/regenerate-qr", status_code=200)
+async def regenerate_qr(product_id: str, user_id: str = Depends(get_current_user_id)):
+    """Issue a brand-new QR reference for a product. Old reference stops working."""
+    db = get_db()
+    mid = _merchant_id(user_id, db)
+    existing = db.table("products").select("*").eq("id", product_id).eq("merchant_id", mid).execute()
+    if not existing.data:
+        raise HTTPException(status_code=404, detail={"code": "not_found", "message": "Product not found."})
+    new_reference = _make_qr_reference()
+    db.table("payment_codes").update({"reference": new_reference, "active": True}).eq("product_id", product_id).execute()
+    product = existing.data[0]
+    product["qr_reference"] = new_reference
+    return product

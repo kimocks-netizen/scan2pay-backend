@@ -34,12 +34,8 @@ def _merchant_id(user_id: str, db) -> str:
     return res.data[0]["id"]
 
 
-def _make_id(db) -> str:
-    try:
-        n = (db.table("payment_codes").select("id", count="exact").execute().count or 0) + 1
-    except Exception:
-        n = int(secrets.token_hex(3), 16) % 100000
-    return f"pc_{str(n).zfill(3)}"
+def _make_id() -> str:
+    return "pc_" + secrets.token_hex(5)
 
 
 @router.get("/merchants/me/payment-codes")
@@ -78,7 +74,7 @@ async def create_code(body: CodeCreate, user_id: str = Depends(get_current_user_
     if body.mode == "variable" and body.amount_cents:
         raise HTTPException(status_code=422, detail={"code": "invalid_field", "message": "variable codes cannot have amount_cents."})
 
-    pc_id = _make_id(db)
+    pc_id = _make_id()
     reference = "QR-" + secrets.token_hex(4).upper()
     res = db.table("payment_codes").insert({
         "id": pc_id,
