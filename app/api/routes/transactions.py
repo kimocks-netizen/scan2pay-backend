@@ -20,6 +20,7 @@ async def list_transactions(
     q: str | None = Query(None),
     single_use: str | None = Query(None),
     charge_session: str | None = Query(None),
+    txn_type: str | None = Query(None),  # charge | product | scan
     limit: int = Query(10, ge=1, le=200),
     offset: int = Query(0, ge=0),
     user_id: str = Depends(get_current_user_id),
@@ -40,6 +41,15 @@ async def list_transactions(
         is_charge = charge_session.lower() == "true"
         count_q = count_q.eq("charge_session", is_charge)
         data_q = data_q.eq("charge_session", is_charge)
+    if txn_type == "charge":
+        count_q = count_q.eq("charge_session", True)
+        data_q = data_q.eq("charge_session", True)
+    elif txn_type == "product":
+        count_q = count_q.not_.is_("product_id", "null")
+        data_q = data_q.not_.is_("product_id", "null")
+    elif txn_type == "scan":
+        count_q = count_q.eq("charge_session", False).is_("product_id", "null")
+        data_q = data_q.eq("charge_session", False).is_("product_id", "null")
     if single_use is not None:
         is_single = single_use.lower() == "true"
         pc_res = db.table("payment_codes").select("id").eq("merchant_id", mid).eq("single_use", is_single).execute()

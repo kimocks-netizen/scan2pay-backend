@@ -60,7 +60,8 @@ popup.newTransaction({
 | Mixed casing in verify response | Both `paid_at` (snake) and `paidAt` (camel) present — use `paid_at` |
 | `authorization` when not paid | Returns `{}` empty object — always guard before reading fields |
 | `type` in transfer recipient | Echoed back as `"basa"` not `"nuban"` for SA accounts |
-| `details.account_name` | `null` in test mode — use name from `POST /bank/resolve` instead |
+| `POST /bank/resolve` in test mode | Returns HTTP 404 with empty body — cannot verify real accounts in test. Expected behaviour. Works in prod. |
+| `account_name` in transfer recipient | `null` in test mode — use name from `POST /bank/resolve` in prod instead |
 | `POST /transfer` | Blocked on starter/test accounts with `transfer_unavailable`. Prod account only. |
 | Webhook `charge.success` reference | `data.reference` = our `STP…` reference (what we passed to initialize). We store this as `paystack_reference` on the transaction and look it up by that column. |
 
@@ -168,7 +169,7 @@ Not yet implemented.
 
 ## Transfer APIs (Merchant Payouts)
 
-### 5. Account Validation ✅ documented, not yet wired
+### 5. Account Validation ⚠️ test mode returns 404
 
 ```
 POST /bank/resolve
@@ -176,15 +177,17 @@ POST /bank/resolve
 
 **Request:**
 ```json
-{ "account_number": "0123456789", "bank_code": "632005" }
+{ "account_number": "62845141407", "bank_code": "250655" }
 ```
 
-**Response:**
+**Test mode behaviour:** Returns HTTP 404 with empty body — Paystack cannot verify real accounts in test mode. This is expected. In production this returns the account holder name.
+
+**Production response:**
 ```json
-{ "status": true, "data": { "account_number": "0123456789", "account_name": "THANDI MOKOENA" } }
+{ "status": true, "data": { "account_number": "62845141407", "account_name": "ACCOUNT HOLDER NAME" } }
 ```
 
-Use `account_name` to confirm with merchant before storing. Store only last 4 digits masked.
+**Our flow:** Call this before saving bank details. Show `account_name` to merchant to confirm it's their account. If 404 in prod → account number or bank code is wrong.
 
 **Common SA bank codes:**
 | Bank | Code |
@@ -199,7 +202,7 @@ Use `account_name` to confirm with merchant before storing. Store only last 4 di
 
 ---
 
-### 6. Create Transfer Recipient ✅ implemented in service, not yet wired to route
+### 6. Create Transfer Recipient ✅ confirmed working in test mode
 
 ```
 POST /transferrecipient
@@ -207,22 +210,38 @@ POST /transferrecipient
 
 **Request:**
 ```json
-{ "type": "nuban", "name": "Thandi Mokoena", "account_number": "0123456789", "bank_code": "632005", "currency": "ZAR" }
+{ "type": "nuban", "name": "Demo Merchant", "account_number": "62845141407", "bank_code": "250655", "currency": "ZAR" }
 ```
 
-**Response:**
+**Confirmed response (test mode, FNB account):**
 ```json
 {
   "status": true,
+  "message": "Transfer recipient created successfully",
   "data": {
-    "recipient_code": "RCP_32cx31lv0eet4xh",
+    "active": true,
+    "currency": "ZAR",
+    "domain": "test",
+    "name": "Demo Merchant",
+    "recipient_code": "RCP_ag9fgil66ki40vu",
     "type": "basa",
-    "details": { "bank_name": "Absa Bank Limited, South Africa", "account_name": null }
+    "details": {
+      "account_number": "62845141407",
+      "account_name": null,
+      "bank_code": "250655",
+      "bank_name": "First National Bank"
+    }
   }
 }
 ```
 
-Store `recipient_code` in `merchant_bank_accounts`. Never expose to frontend.
+**Key observations from live test:**
+- `type` is echoed back as `"basa"` not `"nuban"` for SA accounts — this is correct, do not treat as an error
+- `account_name` is `null` in test mode — in prod use `POST /bank/resolve` name instead
+- `recipient_code` (`RCP_...`) is what we store and use for all future transfers to this merchant
+- Works fully in test mode — no prod account needed
+
+Store `recipient_code` on the merchant record. Never expose to frontend.
 
 ---
 
@@ -274,6 +293,28 @@ GET /transfer/:transfer_code
 ```
 
 Status values: `pending`, `otp`, `success`, `failed`, `reversed`
+
+---
+
+## Platform Balance ✅ confirmed working in test mode
+
+```
+GET /balance
+```
+
+**Confirmed response (test mode):**
+```json
+{
+  "status": true,
+  "message": "Balances retrieved",
+  "data": [{ "currency": "ZAR", "balance": 59987 }]
+}
+```
+
+`balance` is in **cents**. R599.87 in the example above.
+This is the **platform's** Paystack balance — what Scan2Pay has available to pay out to merchants.
+Used by the admin dashboard to show available settlement funds.
+Not exposed to merchants — admin only.
 
 ---
 
@@ -400,12 +441,16 @@ Missed webhook is caught within 15 minutes at most.
 
 ## What's Not Yet Implemented
 
-| Feature | Endpoint | Priority |
-|---|---|---|
-| Bank account validation | `POST /bank/resolve` | Next — withdrawals phase |
-| Bank account route | `POST/GET/PATCH/DELETE /merchants/me/bank-accounts` | Next |
-| Withdrawals route | `POST/GET /merchants/me/withdrawals` | After bank accounts |
-| Merchant balance | `GET /merchants/me/balance` | After bank accounts |
-| Charge authorization | `POST /transaction/charge_authorization` | Phase 2 |
-| Apple Pay domain registration | `POST /apple-pay/domain` | Before go-live |
-| Refunds | `POST /refund` | Phase 2 |
+| Feature | Endpoint | Test mode | Priority |
+|---|---|---|---|
+| Bank account validation | `POST /bank/resolve` | ⚠️ 404 in test, works in prod | Next — settings page |
+| Save bank details + create recipient | `PATCH /merchants/me` + `POST /transferrecipient` | ✅ recipient works in test | Next — settings page |
+| Merchant balance | `GET /merchants/me/balance` | ✅ can build now | Next — withdrawals page |
+| Withdrawal request | `POST /merchants/me/withdrawals` | ✅ can build now | Next |
+| Platform balance (admin) | `GET /balance` | ✅ confirmed working | Next — admin dashboard |
+| Initiate transfer (admin approves) | `POST /transfer` | ⛔ blocked in test | Build now, test on prod |
+| Finalize transfer OTP | `POST /transfer/finalize_transfer` | ⛔ blocked in test | Build now, test on prod |
+| Apple Pay domain registration | `POST /apple-pay/domain` | N/A | Before go-live |
+| Charge authorization (returning customers) | `POST /transaction/charge_authorization` | ✅ works in test | Phase 2 |
+| Refunds | `POST /refund` | ✅ works in test | Phase 2 |
+| Paystack Billing Plans (merchant subscriptions) | `POST /plan` + `POST /subscription` | ✅ works in test | Phase 2 |

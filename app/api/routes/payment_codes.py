@@ -42,6 +42,7 @@ def _make_id() -> str:
 async def list_codes(
     single_use: str | None = None,
     limit: int | None = None,
+    include_products: str | None = None,
     user_id: str = Depends(get_current_user_id),
 ):
     db = get_db()
@@ -50,9 +51,11 @@ async def list_codes(
         db.table("payment_codes")
         .select("*")
         .eq("merchant_id", mid)
-        .is_("product_id", "null")   # exclude product QRs — managed via /products
         .order("created_at", desc=True)
     )
+    # by default exclude product QRs (managed via /products); pass include_products=true to get all
+    if not (include_products and include_products.lower() == "true"):
+        q = q.is_("product_id", "null")
     if single_use is not None:
         q = q.eq("single_use", single_use.lower() == "true")
     if limit is not None:
@@ -118,24 +121,3 @@ async def delete_code(code_id: str, user_id: str = Depends(get_current_user_id))
         raise HTTPException(status_code=400, detail={"code": "product_code", "message": "This QR belongs to a product. Delete or disable the product instead."})
     db.table("payment_codes").delete().eq("id", code_id).execute()
 
-
-@router.get("/pay/{reference}")
-async def resolve_code(reference: str):
-    """Public endpoint — resolves a QR reference to merchant + code info."""
-    db = get_db()
-    res = db.table("payment_codes").select("*").eq("reference", reference).eq("active", True).execute()
-    if not res.data:
-        raise HTTPException(status_code=404, detail={"code": "not_found", "message": "Payment code not found or inactive."})
-    code = res.data[0]
-
-    # resolve product price for fixed-mode codes
-    product = None
-    if code.get("product_id"):
-        pr = db.table("products").select("id,name,description,price_cents,category").eq("id", code["product_id"]).execute()
-        if pr.data:
-            product = pr.data[0]
-            # surface current price on the code so the pay page doesn't need special logic
-            code["amount_cents"] = product["price_cents"]
-
-    merchant = db.table("merchants").select("id,display_name,trading_category,city,province").eq("id", code["merchant_id"]).execute()
-    return {"code": code, "merchant": merchant.data[0] if merchant.data else None, "product": product}

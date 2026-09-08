@@ -33,26 +33,33 @@ Central reference for the entire Scan2Pay platform.
 
 | Project | Path | Status |
 |---------|------|--------|
-| Frontend (Next.js 15) | `../scan2pay-web/` | ✅ All merchant + admin pages built, mock data |
-| Backend (FastAPI + SAM) | `../scan2pay-backend/` | 🔲 Scaffolded, ready to implement |
-| Original frontend (TanStack/Vite) | `../Scan2Pay-frontend/` | Reference only |
+| Frontend (Next.js 15) | `../scan2pay-web/` | ✅ All merchant pages live, wired to real API |
+| Backend (FastAPI + SAM) | `../scan2pay-backend/` | ✅ Live on AWS Lambda (`af-south-1`) |
+| Original frontend (TanStack/Vite) | `../Scan2Pay-frontend/` | Reference only — do not modify |
 
 ## Quick Reference
 
-### Demo Accounts (mock)
-| Role | Phone | Password |
-|------|-------|----------|
-| Vendor | 082 123 4567 | password123 |
-| Tip earner | 083 765 4321 | password123 |
-| Taxi | 084 555 0192 | password123 |
-| Admin | 087 000 1234 | admin123 |
+### Live Accounts (dev)
+| Role | Phone | Password | Notes |
+|------|-------|----------|-------|
+| Vendor | 082 100 0001 | Vendor1234! | user_id: usr_001, mch_001, QR: QR-DEMO0001 |
+| Tip earner | 066 040 4333 | 123456 | user_id: usr_004, mch_003, QR: QR-BA5ECDB1 |
+| Admin | 061 658 3827 | Admin1234 | role: admin |
 
-### API Base URL
+OTP bypass: code `0000`
+
+### API
 | Env | URL |
 |-----|-----|
-| Local | `http://localhost:8000/v1` |
-| Staging | `https://api-staging.scan2pay.co.za/v1` |
-| Production | `https://api.scan2pay.co.za/v1` |
+| Dev (live) | `https://8fhbnwufgi.execute-api.af-south-1.amazonaws.com/Prod` |
+| Prod | TBD |
+
+### Deploy
+```bash
+bash scripts/deploy.sh        # dev
+bash scripts/deploy.sh prod   # prod
+```
+Verifies AWS account `542727784619` (profile: `predictiq`) before deploying.
 
 ### Lambda Summary
 | Lambda | Trigger | Job |

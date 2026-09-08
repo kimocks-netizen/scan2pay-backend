@@ -48,16 +48,16 @@ def _make_qr_reference() -> str:
 async def list_products(user_id: str = Depends(get_current_user_id)):
     db = get_db()
     mid = _merchant_id(user_id, db)
-    # join payment_codes to get the QR reference per product
     products = db.table("products").select("*").eq("merchant_id", mid).order("created_at", desc=True).execute()
     if not products.data:
         return []
-    # fetch linked payment codes in one query
     product_ids = [p["id"] for p in products.data]
-    codes = db.table("payment_codes").select("product_id,reference").in_("product_id", product_ids).execute()
-    code_map = {c["product_id"]: c["reference"] for c in (codes.data or [])}
+    codes = db.table("payment_codes").select("product_id,reference,payments").in_("product_id", product_ids).execute()
+    code_map = {c["product_id"]: c for c in (codes.data or [])}
     for p in products.data:
-        p["qr_reference"] = code_map.get(p["id"])
+        code = code_map.get(p["id"])
+        p["qr_reference"] = code["reference"] if code else None
+        p["payments"] = code["payments"] if code else 0
     return products.data
 
 

@@ -52,12 +52,24 @@ Two rules follow from this:
 Because `fixed` resolves the product price **at scan time**, a merchant changes
 a price in the app and every printed poster is correct instantly. No reprints.
 
+## The vendor charge session flow
+
+The primary vendor flow — merchant types a total, customer scans the same permanent QR:
+
+1. Merchant types R70 on `/charge` → `POST /charges` creates a pending transaction with `charge_session=true`, `charge_expires_at=now+5min`, `access_code_paystack` stored
+2. Customer scans the permanent primary QR → `GET /pay/{reference}` finds the active session → returns `mode: "amount"` with `amount_cents: 7000`
+3. Pay page shows "Amount due R70.00" — no amount entry needed
+4. Customer pays → Paystack reuses the stored `access_code` → webhook fires → transaction marked `success`
+5. After 5 min with no payment → `expire_charges` Lambda sets transaction to `failed`
+
+The QR reference **never changes**. Only the charge session overlays a fixed amount on it temporarily.
+
 ## Till charges (single-use codes)
 
 The vendor flow the product is built around: the merchant types **one total**
 on a keypad, the API mints a throwaway code.
 
-- `single_use = true`, `expires_at = now + 5 minutes` (`CHARGE_TTL_MS = 300 000 ms` in the frontend constant)
+- `single_use = true`, `expires_at = now + 5 minutes`
 - Dies on payment (`paid_at` set, `active = false`) or on expiry
 - Never appears in the printable-codes list
 - **No inventory is captured** — we never store what was sold, only the amount
@@ -67,17 +79,14 @@ countdown in the UI is cosmetic.
 
 ## Environments
 
-| Env | API | Paystack keys |
+| Env | API URL | Paystack |
 | --- | --- | --- |
-| local | `http://localhost:8000` | test |
-| staging | `https://api-staging.scan2pay.co.za` | test |
-| production | `https://api.scan2pay.co.za` | live |
+| dev | `https://8fhbnwufgi.execute-api.af-south-1.amazonaws.com/Prod` | test keys |
+| prod | TBD | live keys |
 
-Secrets held in SSM Parameter Store under `/scan2pay/{env}/` and loaded at
-Lambda cold-start via `app/core/config.py` (Pydantic Settings). Local dev uses
-`.env` (gitignored). Keys: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
-`SUPABASE_ANON_KEY`, `JWT_SECRET`, `PAYSTACK_SECRET_KEY`,
-`PAYSTACK_PUBLIC_KEY`, `PAYSTACK_WEBHOOK_SECRET`, `WINSMS_API_KEY`.
+AWS account: `542727784619` · profile: `predictiq` · region: `af-south-1`
+Deploy: `bash scripts/deploy.sh` (verifies account before deploying)
+Secrets in SSM: `/scan2pay/{env}/SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `JWT_SECRET`, `PAYSTACK_SECRET_KEY`, `PAYSTACK_PUBLIC_KEY`, `PAYSTACK_WEBHOOK_SECRET`, `WINSMS_API_KEY`
 
 ## Background jobs
 

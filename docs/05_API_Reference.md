@@ -1,38 +1,26 @@
 # API reference
 
-Base URL (dev): `https://xuwz8h1y4f.execute-api.af-south-1.amazonaws.com/Prod`
-Base URL (prod): `https://api.scan2pay.co.za/v1`
+Base URL: `https://8fhbnwufgi.execute-api.af-south-1.amazonaws.com/Prod`
 
 > All requests and responses are JSON. Authenticated endpoints send
 > `Authorization: Bearer <access_token>`. Public endpoints (marked **public**) need no token.
 
 ## Error envelope
 
-Every non-2xx response:
-
 ```json
-{
-  "error": {
-    "code": "code_expired",
-    "message": "This payment request has expired. Ask for a new one.",
-    "field": null
-  }
-}
+{ "detail": { "code": "not_found", "message": "Merchant profile not found." } }
 ```
 
 | HTTP | `code` values |
 | --- | --- |
-| 400 | `validation_error`, `amount_too_low`, `amount_too_high` |
-| 401 | `invalid_credentials`, `token_expired`, `token_invalid` |
-| 403 | `not_your_resource`, `plan_limit_reached` |
+| 400 | `validation_error`, `amount_too_low`, `invalid_mode` |
+| 401 | `invalid_credentials`, `token_expired` |
 | 404 | `not_found` |
-| 409 | `phone_taken`, `email_taken`, `already_paid` |
-| 410 | `code_expired`, `code_inactive` |
-| 422 | `payment_failed` |
-| 429 | `rate_limited` |
-| 500 | `internal_error` |
+| 410 | `expired` |
+| 422 | `amount_required` |
+| 500 | `insert_failed`, `qr_failed` |
 
-Minimum amount is **100 cents (R1.00)**; maximum is **5 000 000 cents (R50 000)**.
+Minimum amount: **100 cents (R1.00)**. Maximum: **5 000 000 cents (R50 000)**.
 
 ---
 
@@ -131,10 +119,12 @@ merchant with a masked account. Never return the full account number.
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| `GET` | `/merchants/me/products` | list all |
-| `POST` | `/merchants/me/products` | `{ name, description, price_cents, sku, category }` |
-| `PATCH` | `/merchants/me/products/{id}` | any field |
-| `DELETE` | `/merchants/me/products/{id}` | hard delete |
+| `GET` | `/merchants/me/products` | list — includes `qr_reference` and `payments` (sales count) |
+| `POST` | `/merchants/me/products` | `{ name, description, price_cents, sku, category }` — auto-creates fixed QR, rolls back on failure |
+| `PATCH` | `/merchants/me/products/{id}` | any field; `price_cents` change snapshots old value into `previous_price_cents` |
+| `DELETE` | `/merchants/me/products/{id}` | deactivates linked QR, then hard deletes product |
+| `POST` | `/merchants/me/products/{id}/regenerate-qr` | issues new `PRD-XXXXXXXX` reference, old sticker stops working |
+| `POST` | `/merchants/me/products/{id}/backfill-qr` | creates QR for orphaned product (no existing code) |
 
 Product object:
 
@@ -151,50 +141,60 @@ Product object:
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| `GET` | `/merchants/me/payment-codes` | list all |
-| `POST` | `/merchants/me/payment-codes` | `{ label, caption, mode, product_id, amount_cents, placement }` |
-| `PATCH` | `/merchants/me/payment-codes/{id}` | label, caption, placement, active, description |
-| `DELETE` | `/merchants/me/payment-codes/{id}` | blocked on primary code |
-| `GET` | `/pay/{reference}` | **public** — resolves QR reference → code + merchant |
+| `GET` | `/merchants/me/payment-codes` | excludes product QRs by default; `?include_products=true` for all |
+| `POST` | `/merchants/me/payment-codes` | `mode` must be `variable` or `amount` only |
+| `PATCH` | `/merchants/me/payment-codes/{id}` | label, caption, placement, active, amount_cents |
+| `DELETE` | `/merchants/me/payment-codes/{id}` | blocked on primary code and product-linked codes |
 
-Payment code object:
-
-```json
-{ "id": "pc_002", "merchantId": "mch_001", "reference": "QR-2B41C77",
-  "label": "Full Car Wash", "mode": "fixed", "productId": "prd_003",
-  "amountCents": null, "description": "…", "active": true,
-  "scans": 689, "payments": 501, "createdAt": "2025-11-05T07:34:00Z",
-  "placement": "Wash bay board", "isPrimary": false, "caption": "Scan to Pay",
-  "singleUse": false, "expiresAt": null, "paidAt": null }
-```
-
----
-
-## 5. Till charges ✅ Live
+## 5. Charges ✅ Live
 
 ### `POST /charges` ✅
 ```json
-{ "amount_cents": 4500, "label": "Groceries", "description": "optional" }
+{ "amount_cents": 4500, "label": "Groceries" }
 ```
-Creates a `single_use=true`, `mode=amount` code with `expires_at = now + 5 min`, reference `PAY-XXXXXXXX`.
+Creates a charge session on the merchant's **permanent primary QR**. Cancels any existing active session.
+Stores `access_code_paystack` on the transaction for reuse when customer scans.
+Returns `{ txn_id, reference, access_code, amount_cents, qr_reference, expires_at }`. TTL: 5 minutes.
 
-### `GET /charges/{reference}` ✅
-Returns 410 if already paid or expired.
+## 6. Resolve + pay (public) ✅ Live
 
----
+### `GET /pay/{reference}` **public** ✅
+Resolves any QR reference. For the primary QR, checks for an active charge session:
+- Active session found → returns `mode: "amount"` with the charge amount
+- No session → returns `mode: "variable"` (tip/open payment)
+- Product QR → returns `mode: "fixed"` with live `price_cents` from products table
 
-## 6. Resolve + pay (🔜 next session)
+Response includes `charge_session: { txn_id, amount_cents, expires_at, access_code }` when applicable.
 
-### `POST /payments/initialise` — creates pending transaction + Paystack authorization URL
-### `GET /payments/{id}` — poll for status
-### `POST /webhooks/paystack` — HMAC-SHA512 verified, handles charge.success / charge.failed
+### `POST /pay/{reference}/initialise` **public** ✅
+```json
+{ "amount_cents": 4500, "customer_email": "optional@example.com" }
+```
+For primary QR with active charge session: reuses stored `access_code_paystack`.
+For product/variable: creates new transaction + Paystack initialisation.
+Returns `{ txn_id, access_code, amount_cents }`.
+
+### `POST /webhooks/paystack` **public, HMAC-SHA512 verified** ✅
+Handles `charge.success` → marks transaction `success`, increments `payment_codes.payments`.
+Idempotent by `paystack_reference`.
 
 ---
 
 ## 7. Transactions ✅ Live
 
-### `GET /merchants/me/transactions?status=&limit=50&offset=0` ✅
-### `GET /merchants/me/transactions/{id}` ✅
+### `GET /merchants/me/transactions` ✅
+Query params:
+- `status=success|pending|failed`
+- `method=card|apple_pay|google_pay`
+- `txn_type=charge|product|scan` — charge session / product QR / direct primary scan
+- `charge_session=true|false`
+- `q=` — search by reference (ilike)
+- `limit=10` (max 200), `offset=0`
+
+Returns `{ "data": [...], "total": N, "offset": N }`.
+
+### `GET /merchants/me/transactions/{txn_id}` ✅
+### `GET /payments/{txn_id}` ✅ — polled by charge page every 1.5s
 
 ---
 
