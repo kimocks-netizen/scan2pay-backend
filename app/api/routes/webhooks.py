@@ -28,13 +28,15 @@ async def paystack_webhook(request: Request):
     db = get_db()
 
     # insert webhook event — UNIQUE(provider, event_type, provider_reference) makes replays no-ops
+    import secrets as _secrets
     try:
         db.table("webhook_events").insert({
+            "id": _secrets.token_hex(16),
             "provider": "paystack",
             "event_type": event,
             "provider_reference": provider_reference,
             "payload": payload,
-            "received_at": datetime.now(timezone.utc).isoformat(),
+            "signature_valid": True,
         }).execute()
     except Exception:
         # duplicate — already processed, return 200 immediately
