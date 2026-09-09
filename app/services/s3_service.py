@@ -13,7 +13,12 @@ def _client():
     global _s3
     if _s3 is None:
         settings = get_settings()
-        _s3 = boto3.client("s3", region_name=settings.aws_region)
+        region = settings.aws_region
+        _s3 = boto3.client(
+            "s3",
+            region_name=region,
+            endpoint_url=f"https://s3.{region}.amazonaws.com",
+        )
     return _s3
 
 

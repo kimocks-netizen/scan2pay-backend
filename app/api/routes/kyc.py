@@ -111,6 +111,26 @@ async def list_kyc_documents(user_id: str = Depends(get_current_user_id)):
     return {"kyc_status": merchant["kyc_status"], "documents": docs.data or []}
 
 
+# ── Merchant: get presigned view URL for own document ───────────────────────
+
+@router.get("/merchants/me/documents/{doc_id}/file")
+async def get_merchant_kyc_file_url(
+    doc_id: str,
+    user_id: str = Depends(get_current_user_id),
+):
+    db = get_db()
+    merchant_res = db.table("merchants").select("id").eq("user_id", user_id).execute()
+    if not merchant_res.data:
+        raise HTTPException(status_code=404, detail={"code": "not_found", "message": "Merchant not found"})
+    merchant_id = merchant_res.data[0]["id"]
+
+    res = db.table("merchant_documents").select("s3_key").eq("id", doc_id).eq("merchant_id", merchant_id).execute()
+    if not res.data:
+        raise HTTPException(status_code=404, detail={"code": "not_found", "message": "Document not found"})
+
+    return {"url": presign_get(res.data[0]["s3_key"]), "expires_in": 900}
+
+
 # ── Staff: KYC review queue ───────────────────────────────────────────────────
 
 @router.get("/admin/kyc")
