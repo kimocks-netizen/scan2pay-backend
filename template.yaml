@@ -112,17 +112,39 @@ Resources:
             Schedule: cron(0 18 * * ? *)
             Description: Build settlements daily at 18:00 UTC (20:00 SAST)
 
-  # ── S3 bucket for merchant logos, QR images, receipts ──────────────────────
+  # ── S3 bucket for merchant logos, QR images, KYC docs, CMS assets ──────────
   AssetsBucket:
     Type: AWS::S3::Bucket
     Properties:
       BucketName: !Sub 'scan2pay-assets-${Environment}-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
       CorsConfiguration:
         CorsRules:
-          - AllowedMethods: [GET, PUT]
+          - AllowedMethods: [GET, PUT, HEAD]
             AllowedOrigins: ['*']
-            AllowedHeaders: ['*']
+            AllowedHeaders: ['*', 'content-type', 'x-amz-*']
+            ExposedHeaders: [ETag]
             MaxAge: 3600
+      LifecycleConfiguration:
+        Rules:
+          - Id: ArchiveKycDocs
+            Status: Enabled
+            Prefix: kyc/
+            Transitions:
+              - TransitionInDays: 90
+                StorageClass: GLACIER_IR
+              - TransitionInDays: 365
+                StorageClass: GLACIER
+            ExpirationInDays: 730
+          - Id: ArchiveCmsAssets
+            Status: Enabled
+            Prefix: cms/
+            Transitions:
+              - TransitionInDays: 90
+                StorageClass: GLACIER_IR
 
 Conditions:
   IsProd: !Equals [!Ref Environment, prod]

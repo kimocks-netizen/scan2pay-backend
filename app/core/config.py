@@ -28,6 +28,7 @@ class Settings(BaseSettings):
 
     # ── AWS ───────────────────────────────────────────────────────────────────
     aws_region: str = "af-south-1"
+    assets_bucket: str = ""
 
     # ── App ───────────────────────────────────────────────────────────────────
     app_name: str = "Scan2Pay API"

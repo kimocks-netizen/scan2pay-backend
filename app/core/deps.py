@@ -21,3 +21,12 @@ def require_admin(user_id: str = Depends(get_current_user_id)) -> str:
     if not res.data:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
     return user_id
+
+
+def require_staff(user_id: str = Depends(get_current_user_id)) -> str:
+    """Admin or support — used for KYC review, CMS, support stats."""
+    db = get_db()
+    res = db.table("user_roles").select("role").eq("user_id", user_id).in_("role", ["admin", "support"]).execute()
+    if not res.data:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Staff access required")
+    return user_id

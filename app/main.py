@@ -13,7 +13,7 @@ from app.api.routes import (
     auth, merchants, products, payment_codes,
     charges, payments, webhooks,
     transactions, withdrawals,
-    billing, admin, health,
+    billing, admin, kyc, cms, support, health,
 )
 
 logging.basicConfig(level=logging.INFO)
@@ -65,6 +65,9 @@ app.include_router(webhooks.router,      prefix="/webhooks",     tags=["Webhooks
 app.include_router(transactions.router,  prefix="",              tags=["Transactions"])
 app.include_router(billing.router,       prefix="",              tags=["Billing"])
 app.include_router(admin.router,         prefix="/admin",        tags=["Admin"])
+app.include_router(kyc.router,           prefix="",              tags=["KYC"])
+app.include_router(cms.router,           prefix="",              tags=["CMS"])
+app.include_router(support.router,       prefix="",              tags=["Support"])
 
 # ── Lambda handler ────────────────────────────────────────────────────────────
 handler = Mangum(app, lifespan="off")
