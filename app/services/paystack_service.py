@@ -183,3 +183,17 @@ def list_transfers(page: int = 1, per_page: int = 50) -> dict:
     if not raw.get("status"):
         raise PaystackError(raw.get("message", "Paystack error"))
     return {"data": raw["data"], "meta": raw.get("meta", {})}
+
+
+def get_balance() -> dict:
+    """Returns {currency, balance} — balance in cents."""
+    with _client() as c:
+        res = c.get("/balance")
+    data = _raise(res)
+    # Paystack returns a list of balances; find ZAR
+    if isinstance(data, list):
+        for b in data:
+            if b.get("currency") == "ZAR":
+                return {"currency": "ZAR", "balance": b["balance"]}
+        return {"currency": "ZAR", "balance": 0}
+    return data
