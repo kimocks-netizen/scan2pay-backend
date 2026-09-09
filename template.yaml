@@ -97,7 +97,7 @@ Resources:
             Schedule: cron(*/15 * * * ? *)
             Description: Reconcile Paystack every 15 minutes
 
-  # ── Cron: build settlement batches daily at 02:00 SAST ─────────────────────
+  # ── Cron: build settlement batches daily at 20:00 SAST (18:00 UTC) ──────────
   BuildSettlementsFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -109,8 +109,8 @@ Resources:
         Schedule:
           Type: Schedule
           Properties:
-            Schedule: cron(0 0 * * ? *)
-            Description: Build settlements daily at 00:00 UTC (02:00 SAST)
+            Schedule: cron(0 18 * * ? *)
+            Description: Build settlements daily at 18:00 UTC (20:00 SAST)
 
   # ── S3 bucket for merchant logos, QR images, receipts ──────────────────────
   AssetsBucket:

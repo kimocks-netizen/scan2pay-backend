@@ -102,6 +102,40 @@ def create_transfer_recipient(name: str, account_number: str, bank_code: str) ->
     return _raise(res)
 
 
+def validate_bank_account(
+    bank_code: str,
+    account_number: str,
+    account_name: str,
+    id_number: str,
+    account_type: str = "personal",
+    document_type: str = "identityNumber",
+) -> dict:
+    """
+    Cross-checks account number against SA ID or passport number.
+    document_type: "identityNumber" | "passportNumber"
+    Returns data dict with: verified, accountHolderMatch, accountAcceptsCredits, verificationMessage.
+    In test mode: always returns verified=False — skip this call in test.
+    """
+    with _client() as c:
+        res = c.post("/bank/validate", json={
+            "bank_code": bank_code,
+            "country_code": "ZA",
+            "account_number": account_number,
+            "account_name": account_name,
+            "account_type": account_type,
+            "document_type": document_type,
+            "document_number": id_number,
+        })
+    return _raise(res)
+
+
+def list_banks() -> list:
+    """Returns list of Paystack-supported SA banks with name and code."""
+    with _client() as c:
+        res = c.get("/bank", params={"country": "south africa", "currency": "ZAR"})
+    return _raise(res)
+
+
 # ── Transfers (prod-only — blocked on starter/test accounts) ─────────────────
 
 def initiate_transfer(amount_cents: int, recipient_code: str, reference: str, reason: str) -> dict:
@@ -132,3 +166,20 @@ def fetch_transfer(transfer_code: str) -> dict:
     with _client() as c:
         res = c.get(f"/transfer/{transfer_code}")
     return _raise(res)
+
+
+def verify_transfer(reference: str) -> dict:
+    """Look up a transfer by our WD-... reference instead of transfer_code."""
+    with _client() as c:
+        res = c.get(f"/transfer/verify/{reference}")
+    return _raise(res)
+
+
+def list_transfers(page: int = 1, per_page: int = 50) -> dict:
+    """Returns {data: [...], meta: {total, page, perPage, pageCount}}."""
+    with _client() as c:
+        res = c.get("/transfer", params={"page": page, "perPage": per_page})
+    raw = res.json()
+    if not raw.get("status"):
+        raise PaystackError(raw.get("message", "Paystack error"))
+    return {"data": raw["data"], "meta": raw.get("meta", {})}

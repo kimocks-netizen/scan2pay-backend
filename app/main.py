@@ -54,6 +54,8 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 # ── Routes ────────────────────────────────────────────────────────────────────
 app.include_router(health.router,        prefix="/health",       tags=["Health"])
 app.include_router(auth.router,          prefix="/auth",         tags=["Auth"])
+# withdrawals before merchants so /merchants/me/withdrawals isn't swallowed by /merchants/{merchant_id}
+app.include_router(withdrawals.router,   prefix="",              tags=["Withdrawals"])
 app.include_router(merchants.router,     prefix="/merchants",    tags=["Merchants"])
 app.include_router(products.router,      prefix="",              tags=["Products"])
 app.include_router(payment_codes.router, prefix="",              tags=["Payment Codes"])
@@ -61,7 +63,6 @@ app.include_router(charges.router,       prefix="",              tags=["Charges"
 app.include_router(payments.router,      prefix="/payments",     tags=["Payments"])
 app.include_router(webhooks.router,      prefix="/webhooks",     tags=["Webhooks"])
 app.include_router(transactions.router,  prefix="",              tags=["Transactions"])
-app.include_router(withdrawals.router,   prefix="",              tags=["Withdrawals"])
 app.include_router(billing.router,       prefix="",              tags=["Billing"])
 app.include_router(admin.router,         prefix="/admin",        tags=["Admin"])
 

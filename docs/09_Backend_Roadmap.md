@@ -25,88 +25,77 @@ Python 3.13 · FastAPI · Mangum · Supabase (Postgres) · Paystack · WinSMS ·
 | `Scan2PayApiFunction` | API Gateway `/{proxy+}` | Entire FastAPI app via Mangum |
 | `ExpireChargesFunction` | EventBridge every 1 min | Set `active=false` on codes past `expires_at` |
 | `ReconcilePaystackFunction` | EventBridge every 15 min | Verify `pending` payments older than 10 min |
-| `BuildSettlementsFunction` | EventBridge daily 02:00 SAST | Group settled transactions into payout rows |
+| `BuildSettlementsFunction` | EventBridge daily **18:00 UTC (20:00 SAST)** | Settle eligible transactions (T+2 clearing) |
 
 ---
 
-## Phase 1 — Foundation ✅
-- [x] Project structure, `requirements.txt`, SAM template
-- [x] `app/core/config.py`, `security.py`, `deps.py`
-- [x] `app/db/connection.py` — Supabase client singleton
-- [x] `app/main.py` — FastAPI + all routers + Mangum + global exception handler
-- [x] `app/services/sms_service.py` — WinSMS OTP
-- [x] All 3 cron Lambdas implemented
+## Phase 1 — Merchant ✅ COMPLETE
 
-## Phase 2 — Database ✅
-- [x] `001_enums.sql` through `008_webhooks_audit.sql` — all run ✅
-- [x] `009_merchant_bank_accounts.sql` — **not yet run** (needed for withdrawals)
-- [x] `010_txn_authorization_code.sql` — `ALTER TABLE transactions ADD COLUMN authorization_code text` ✅ run manually
-- [x] `seed.sql` — test user `+27820000099` / `Test1234!`, merchant `mch_004`, payment code `QR-890E282B` ✅
-
-## Phase 3–5 — Schemas / Services ✅
-- [x] `app/services/paystack_service.py` — initialize, verify, list, create_recipient, initiate/finalize/fetch transfer
-- [x] All schemas inline in routes (sufficient for current complexity)
-
-## Phase 6 — Routes ✅ (all live)
-
+### Routes (all live)
 | Route file | Endpoints | Status |
 |---|---|---|
 | `health.py` | `GET /health` | ✅ |
-| `auth.py` | register, login, refresh, logout, me, otp/request, otp/verify | ✅ |
-| `merchants.py` | `GET/PATCH /merchants/me`, `GET /merchants/:id` | ✅ |
-| `products.py` | CRUD `/merchants/me/products` | ✅ |
-| `payment_codes.py` | CRUD `/merchants/me/payment-codes`, `GET /pay/:reference` | ✅ |
-| `charges.py` | `POST /charges`, `GET /charges/:reference`, `POST /pay/:reference/initialise` (public) | ✅ |
+| `auth.py` | register, login, refresh, logout, me, otp | ✅ |
+| `merchants.py` | `GET/PATCH /merchants/me`, `PATCH /me/payout-account`, `GET /me/balance`, `GET /:id` | ✅ |
+| `products.py` | CRUD `/merchants/me/products`, regenerate-qr | ✅ |
+| `payment_codes.py` | CRUD `/merchants/me/payment-codes` | ✅ |
+| `charges.py` | `POST /charges`, charge session flow | ✅ |
 | `payments.py` | `POST /payments/initialise`, `GET /payments/:id` | ✅ |
-| `transactions.py` | `GET /merchants/me/transactions` (pagination + filters), `GET /:id` | ✅ |
-| `webhooks.py` | `POST /webhooks/paystack` — charge.success, transfer.* | ✅ |
-| `withdrawals.py` | stub | 🔴 needs implementation |
-| `bank_accounts.py` | **not yet created** | ❌ |
-| `billing.py` | stub | 🔴 |
-| `admin.py` | stub | 🔴 |
+| `transactions.py` | paginated + filters (status/method/type/settlement) | ✅ |
+| `withdrawals.py` | `GET/POST/DELETE /merchants/me/withdrawals` | ✅ |
+| `billing.py` | `GET /billing/banks` — 33 SA banks proxy | ✅ |
+| `webhooks.py` | charge.success, transfer.success/failed/reversed | ✅ |
+| `admin.py` | settlements pending/run, withdrawals approve/reject | ✅ partial |
 
-## Phase 7 — Cron Lambdas ✅
-- [x] `expire_charges.py` — bulk deactivate codes past `expires_at`
-- [x] `reconcile_paystack.py` — verify `pending` txns > 10 min old
-- [x] `build_settlements.py` — group settled txns into payout rows per merchant
+### Migrations run
+- `001` through `012` ✅
+- `013_payout_kyc_withdrawals.sql` ✅ — payout_account_name, kyc_status, transfer_code, failure_reason, expanded withdrawal status
+
+### Cron Lambdas
+- `expire_charges.py` ✅
+- `reconcile_paystack.py` ✅
+- `build_settlements.py` ✅ — simplified, uses `settlement_service.run_settlements()`, T+2 clearing
 
 ---
 
-## What's Next — Priority Order
+## Phase 2 — Admin Console 🔴 NEXT
 
-### 1. 🔴 Bank Accounts route (needed before withdrawals)
-**File:** `app/api/routes/bank_accounts.py`
+### Backend needed
+| Endpoint | Notes |
+|---|---|
+| `GET /admin/merchants` | list all, plan + status |
+| `PATCH /admin/merchants/{id}` | suspend/activate + plan change |
+| `GET /admin/users` | list all users with role |
+| `PATCH /admin/users/{id}` | suspend/activate |
+| `GET /admin/transactions` | platform-wide, all merchants, same filters |
+| `GET /admin/balance` | Paystack `GET /balance` → ZAR cents |
+| `GET /admin/audit` | `webhook_events` table, paginated |
 
-Endpoints:
-- `POST /merchants/me/bank-accounts` — validate via `POST /bank/resolve`, create Paystack recipient, store masked account
-- `GET /merchants/me/bank-accounts` — list merchant's accounts
-- `PATCH /merchants/me/bank-accounts/:id/set-default` — flip default
-- `DELETE /merchants/me/bank-accounts/:id` — block if only/default account
+### Frontend pages to wire
+| Page | Status |
+|------|--------|
+| `/admin/dashboard` | mockApi → real stats + Paystack balance card |
+| `/admin/merchants` | mockApi → real list, suspend, plan |
+| `/admin/users` | mockApi → real list, suspend |
+| `/admin/transactions` | mockApi → platform-wide list |
+| `/admin/withdrawals` | mockApi → approve/reject queue (backend ✅) |
+| `/admin/settlements` | partially wired ✅ |
+| `/admin/audit` | mockApi → webhook_events log |
+| `/admin/providers` | mockApi → Paystack balance |
 
-Migration `009_merchant_bank_accounts.sql` must be run first.
+---
 
-### 2. 🔴 Withdrawals route (depends on bank accounts)
-**File:** `app/api/routes/withdrawals.py`
+## Phase 3 — Support role 🔲
+- Read-only: transactions, merchants, users
+- No financial actions
+- Route guard already in `MERCHANT_ROUTES_BY_TYPE`
 
-Endpoints:
-- `GET /merchants/me/balance` — sum of `net_cents` where `settlement_status=settled` and no `payout_id`, minus pending withdrawals
-- `GET /merchants/me/withdrawals` — list with status
-- `POST /merchants/me/withdrawals` — create withdrawal → `POST /transfer` (prod only)
-- `DELETE /merchants/me/withdrawals/:id` — cancel if still `pending`
-
-Note: `POST /transfer` is blocked on Paystack test/starter accounts. Build the route, test the DB logic, but Paystack call will only work on prod account.
-
-### 3. 🔴 Settings page backend (already live — just needs frontend wiring)
-`GET/PATCH /merchants/me` already works. Frontend settings page still on mockApi.
-
-### 4. 🔴 Admin routes
-**File:** `app/api/routes/admin.py`
-
-Needs: merchant list, transaction list, settlement management, pricing version management, manual reconcile trigger.
-
-### 5. 🔴 Charge authorization (returning customers)
-`POST /transaction/charge_authorization` — skip card entry for customers who've paid before.
-Requires storing `authorization_code` per customer email (already have the column).
+## Phase 4 — Production readiness 🔲
+- Paystack live keys
+- `POST /apple-pay/domain` — register scan2pay.site
+- Verify webhook URL in Paystack dashboard
+- Verify `build_settlements` cron running in prod (CloudWatch logs)
+- Custom domain for API Gateway
 
 ---
 
@@ -121,6 +110,9 @@ Requires storing `authorization_code` per customer email (already have the colum
 | Webhook `.single()` on payment_codes throws, swallows charge.success | Fixed + wrapped handlers in try/except |
 | STP000021 stuck pending (webhook fired before fix deployed) | Manually patched via Supabase REST API |
 | `transactions` endpoint returning `count` not `total` | Fixed — now returns `total` from `count="exact"` |
+| Duplicate `GET /pay/{reference}` route in payment_codes.py | Removed — charges.py version has charge session logic |
+| `/merchants/me` 404 — wildcard `/{merchant_id}` catching `/me` | Fixed route order — `/me` routes registered before wildcard |
+| `document_type` hardcoded as `identityNumber` in KYC | Now driven by frontend toggle (SA ID / Passport) |
 
 ---
 
@@ -135,9 +127,3 @@ Requires storing `authorization_code` per customer email (already have the colum
 /scan2pay/dev/PAYSTACK_PUBLIC_KEY        → pk_test_23c73dd403061843824f61e3cb4cd96bd5220110
 /scan2pay/dev/PAYSTACK_WEBHOOK_SECRET    → same value as PAYSTACK_SECRET_KEY ✅
 ```
-
-## Test Credentials
-- Phone: `+27820000099` · Password: `Test1234!`
-- `user_id=usr_005` · `merchant_id=mch_004`
-- Primary payment code: `QR-890E282B`
-- Test card (success): `4084 0840 8408 4081` · any future expiry · CVV `408`
