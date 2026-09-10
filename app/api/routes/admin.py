@@ -45,6 +45,19 @@ class PricingVersionCreate(BaseModel):
 
 # ── Pricing ──────────────────────────────────────────────────────────────────
 
+
+@router.get("/kyc/bank-checks")
+async def list_bank_checks(staff_id: str = Depends(require_staff)):
+    """Merchants who have run Paystack bank validation — for admin KYC review."""
+    db = get_db()
+    res = db.table("merchants") \
+        .select("id,business_name,kyc_status,payout_bank,payout_account_masked,payout_account_name,bank_verified,bank_holder_match,bank_accepts_credits,bank_account_open,bank_open_3_months,bank_verification_msg,bank_validated_at") \
+        .not_.is_("bank_validated_at", "null") \
+        .order("bank_validated_at", desc=True) \
+        .execute()
+    return res.data or []
+
+
 @router.get("/pricing")
 async def list_pricing_versions(admin_id: str = Depends(require_admin)):
     db = get_db()

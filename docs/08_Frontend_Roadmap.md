@@ -112,6 +112,15 @@ CMS images use `force-dynamic` + `cache: "no-store"` so new uploads appear immed
 
 ---
 
+## 🔲 Future — Multiple Bank Accounts
+
+- [ ] Up to 2 bank accounts per merchant with a default
+- [ ] Settings page: list accounts, add/remove, set default
+- [ ] Withdrawal page: account selector when requesting payout
+- [ ] See `09_Backend_Roadmap.md` for full API spec
+
+---
+
 ## API Wiring Status
 
 ### Auth ✅

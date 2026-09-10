@@ -154,6 +154,19 @@ OTP bypass: `0000`
 
 ---
 
+## 🔲 Future — Multiple Bank Accounts
+
+- [ ] Migration: `merchant_bank_accounts` table (`id`, `merchant_id`, `bank_code`, `bank_name`, `account_masked`, `account_name`, `paystack_recipient_code`, `is_default`, `created_at`)
+- [ ] `GET /merchants/me/bank-accounts` — list saved accounts
+- [ ] `POST /merchants/me/bank-accounts` — add new account (max 2), runs Paystack validation in prod
+- [ ] `PATCH /merchants/me/bank-accounts/{id}/default` — set default
+- [ ] `DELETE /merchants/me/bank-accounts/{id}` — remove (cannot remove default if only one)
+- [ ] `POST /merchants/me/withdrawals` — accept optional `bank_account_id`, falls back to default
+- [ ] Settings page: list accounts with default badge, add/remove, set default
+- [ ] Withdrawal page: account selector when requesting payout
+
+---
+
 ## SSM Parameters
 ```
 /scan2pay/dev/SUPABASE_URL

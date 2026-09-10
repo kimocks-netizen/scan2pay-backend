@@ -21,6 +21,8 @@ from app.schemas.auth import (
     LoginRequest,
     OtpRequestBody,
     OtpVerifyRequest,
+    PasswordResetConfirmBody,
+    PasswordResetRequestBody,
     PublicUser,
     RefreshRequest,
     RegisterRequest,
@@ -60,7 +62,6 @@ def _user_to_public(row: dict, db, merchant_id: str | None = None) -> PublicUser
 
 
 def _make_id(prefix: str, db) -> str:
-    """Generate a short sequential-style ID by counting existing rows."""
     table = {"usr": "users", "mch": "merchants", "pc": "payment_codes", "rt": "refresh_tokens", "otp": "otp_codes", "ur": "user_roles"}.get(prefix, prefix)
     try:
         res = db.table(table).select("id", count="exact").execute()
@@ -122,18 +123,52 @@ async def _send_otp_to(phone: str, db) -> None:
         logger.warning("WinSMS delivery failed for %s", phone)
 
 
+def _verify_otp(phone: str, code: str, db) -> None:
+    otps = (
+        db.table("otp_codes")
+        .select("*")
+        .eq("phone", phone)
+        .is_("consumed_at", "null")
+        .order("created_at", desc=True)
+        .limit(1)
+        .execute()
+    )
+    if not otps.data:
+        raise HTTPException(status_code=400, detail={"code": "validation_error", "message": "No active OTP found. Request a new one."})
+
+    otp = otps.data[0]
+    expires = datetime.fromisoformat(otp["expires_at"].replace("Z", "+00:00"))
+    if datetime.now(timezone.utc) > expires:
+        raise HTTPException(status_code=400, detail={"code": "validation_error", "message": "OTP has expired. Request a new one."})
+
+    if otp["attempts"] >= OTP_MAX_ATTEMPTS:
+        raise HTTPException(status_code=400, detail={"code": "validation_error", "message": "Too many incorrect attempts. Request a new OTP."})
+
+    if hash_token(code) != otp["code_hash"]:
+        db.table("otp_codes").update({"attempts": otp["attempts"] + 1}).eq("id", otp["id"]).execute()
+        raise HTTPException(status_code=400, detail={"code": "validation_error", "message": "Incorrect verification code."})
+
+    db.table("otp_codes").update({"consumed_at": datetime.now(timezone.utc).isoformat()}).eq("id", otp["id"]).execute()
+
+
+def _resolve_user_by_identifier(identifier: str, db) -> dict:
+    phone = normalise_phone(identifier)
+    res = db.table("users").select("*").eq("phone", phone).execute()
+    if not res.data and "@" in identifier:
+        res = db.table("users").select("*").eq("email", identifier.strip().lower()).execute()
+    return res.data[0] if res.data else None
+
+
 # ── register ──────────────────────────────────────────────────────────────────
 
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 async def register(body: RegisterRequest, request: Request):
     db = get_db()
 
-    # duplicate phone
     existing = db.table("users").select("id").eq("phone", body.phone).execute()
     if existing.data:
         raise HTTPException(status_code=409, detail={"code": "phone_taken", "message": "That mobile number is already registered."})
 
-    # duplicate email
     if body.email:
         existing_email = db.table("users").select("id").eq("email", body.email.lower()).execute()
         if existing_email.data:
@@ -143,10 +178,8 @@ async def register(body: RegisterRequest, request: Request):
     merchant_id = _make_id("mch", db)
     pc_id = _make_id("pc", db)
     reference = "QR-" + secrets.token_hex(4).upper()
-
     ur_id = _make_id("ur", db)
 
-    # insert user
     db.table("users").insert({
         "id": user_id,
         "full_name": body.full_name,
@@ -160,10 +193,8 @@ async def register(body: RegisterRequest, request: Request):
         "email_verified": False,
     }).execute()
 
-    # insert role
     db.table("user_roles").insert({"id": ur_id, "user_id": user_id, "role": "merchant"}).execute()
 
-    # insert merchant
     slug = user_id
     db.table("merchants").insert({
         "id": merchant_id,
@@ -177,7 +208,6 @@ async def register(body: RegisterRequest, request: Request):
         "status": "active",
     }).execute()
 
-    # insert primary payment code
     db.table("payment_codes").insert({
         "id": pc_id,
         "merchant_id": merchant_id,
@@ -192,11 +222,8 @@ async def register(body: RegisterRequest, request: Request):
         "placement": "Not set",
     }).execute()
 
-    # send OTP
     await _send_otp_to(body.phone, db)
-
     access, refresh = await _issue_tokens(user_id, db, request)
-
     user_row = db.table("users").select("*").eq("id", user_id).single().execute().data
     return AuthResponse(
         user=_user_to_public(user_row, db, merchant_id=merchant_id),
@@ -211,7 +238,6 @@ async def register(body: RegisterRequest, request: Request):
 async def login(body: LoginRequest, request: Request):
     db = get_db()
 
-    # try phone first, then email
     phone = normalise_phone(body.identifier)
     res = db.table("users").select("*").eq("phone", phone).execute()
     if not res.data:
@@ -228,19 +254,15 @@ async def login(body: LoginRequest, request: Request):
     if not verify_password(body.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail={"code": "invalid_credentials", "message": "That password is incorrect."})
 
-    # get merchant id
     mch = db.table("merchants").select("id").eq("user_id", user["id"]).execute()
     merchant_id = mch.data[0]["id"] if mch.data else None
 
-    # update last_login_at
     db.table("users").update({"last_login_at": datetime.now(timezone.utc).isoformat()}).eq("id", user["id"]).execute()
 
-    # send OTP if phone not yet verified
     if not user.get("phone_verified"):
         await _send_otp_to(user["phone"], db)
 
     access, refresh = await _issue_tokens(user["id"], db, request)
-
     return AuthResponse(
         user=_user_to_public(user, db, merchant_id=merchant_id),
         access_token=access,
@@ -262,7 +284,6 @@ async def refresh_tokens(body: RefreshRequest, request: Request):
     if not rt.data or rt.data[0].get("revoked_at"):
         raise HTTPException(status_code=401, detail={"code": "token_invalid", "message": "Refresh token has been revoked."})
 
-    # revoke old token
     db.table("refresh_tokens").update({"revoked_at": datetime.now(timezone.utc).isoformat()}).eq("token_hash", token_hash).execute()
 
     user_id = payload["sub"]
@@ -307,7 +328,6 @@ async def otp_request(body: OtpRequestBody):
     db = get_db()
     user = db.table("users").select("id").eq("phone", body.phone).execute()
     if not user.data:
-        # don't reveal whether the phone exists
         return
     await _send_otp_to(body.phone, db)
 
@@ -317,41 +337,36 @@ async def otp_request(body: OtpRequestBody):
 @router.post("/otp/verify", response_model=PublicUser)
 async def otp_verify(body: OtpVerifyRequest, user_id: str = Depends(get_current_user_id)):
     db = get_db()
-
-    # find the latest unconsumed OTP for this phone
-    otps = (
-        db.table("otp_codes")
-        .select("*")
-        .eq("phone", body.phone)
-        .is_("consumed_at", "null")
-        .order("created_at", desc=True)
-        .limit(1)
-        .execute()
-    )
-    if not otps.data:
-        raise HTTPException(status_code=400, detail={"code": "validation_error", "message": "No active OTP found. Request a new one."})
-
-    otp = otps.data[0]
-
-    # check expiry
-    expires = datetime.fromisoformat(otp["expires_at"].replace("Z", "+00:00"))
-    if datetime.now(timezone.utc) > expires:
-        raise HTTPException(status_code=400, detail={"code": "validation_error", "message": "OTP has expired. Request a new one."})
-
-    # check attempts
-    if otp["attempts"] >= OTP_MAX_ATTEMPTS:
-        raise HTTPException(status_code=400, detail={"code": "validation_error", "message": "Too many incorrect attempts. Request a new OTP."})
-
-    # verify code
-    if hash_token(body.code) != otp["code_hash"]:
-        db.table("otp_codes").update({"attempts": otp["attempts"] + 1}).eq("id", otp["id"]).execute()
-        raise HTTPException(status_code=400, detail={"code": "validation_error", "message": "Incorrect verification code."})
-
-    # consume OTP + mark phone verified
-    db.table("otp_codes").update({"consumed_at": datetime.now(timezone.utc).isoformat()}).eq("id", otp["id"]).execute()
+    _verify_otp(body.phone, body.code, db)
     db.table("users").update({"phone_verified": True}).eq("id", user_id).execute()
-
     user = db.table("users").select("*").eq("id", user_id).single().execute().data
     mch = db.table("merchants").select("id").eq("user_id", user_id).execute()
     merchant_id = mch.data[0]["id"] if mch.data else None
     return _user_to_public(user, merchant_id=merchant_id)
+
+
+# ── Password reset request ────────────────────────────────────────────────────
+
+@router.post("/password-reset/request", status_code=status.HTTP_204_NO_CONTENT)
+async def password_reset_request(body: PasswordResetRequestBody):
+    db = get_db()
+    user = _resolve_user_by_identifier(body.identifier, db)
+    if not user:
+        return  # don't reveal whether account exists
+    await _send_otp_to(user["phone"], db)
+
+
+# ── Password reset confirm ────────────────────────────────────────────────────
+
+@router.post("/password-reset/confirm", status_code=status.HTTP_204_NO_CONTENT)
+async def password_reset_confirm(body: PasswordResetConfirmBody):
+    if len(body.new_password) < 6:
+        raise HTTPException(status_code=422, detail={"code": "weak_password", "message": "Password must be at least 6 characters."})
+
+    db = get_db()
+    user = _resolve_user_by_identifier(body.identifier, db)
+    if not user:
+        raise HTTPException(status_code=404, detail={"code": "not_found", "message": "No account found."})
+
+    _verify_otp(user["phone"], body.code, db)
+    db.table("users").update({"password_hash": hash_password(body.new_password)}).eq("id", user["id"]).execute()

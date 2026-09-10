@@ -94,10 +94,8 @@ async def save_payout_account(body: PayoutAccountRequest, user_id: str = Depends
     mid = merchant["id"]
     is_prod = settings.environment == "prod"
 
-    # ── Step 1: KYC (prod only) ───────────────────────────────────────────────
-    if is_prod:
-        if not body.id_number:
-            raise HTTPException(status_code=422, detail={"code": "id_required", "message": "ID or passport number is required."})
+    # ── Step 1: Paystack bank validation (both envs — blocks in prod, informational in test) ──
+    if body.id_number:
         try:
             kyc = validate_bank_account(
                 bank_code=body.bank_code,
@@ -107,20 +105,46 @@ async def save_payout_account(body: PayoutAccountRequest, user_id: str = Depends
                 account_type="personal",
                 document_type=body.document_type,
             )
-        except PaystackError as e:
-            raise HTTPException(status_code=502, detail={"code": e.code, "message": e.message})
+            # Always store result so admin sees it in KYC queue
+            db.table("merchants").update({
+                "bank_verified":         kyc.get("verified", False),
+                "bank_holder_match":     kyc.get("accountHolderMatch", False),
+                "bank_accepts_credits":  kyc.get("accountAcceptsCredits", False),
+                "bank_account_open":     kyc.get("accountOpen", False),
+                "bank_open_3_months":    kyc.get("accountOpenForMoreThanThreeMonths", False),
+                "bank_verification_msg": kyc.get("verificationMessage"),
+                "bank_validated_at":     datetime.now(timezone.utc).isoformat(),
+            }).eq("id", mid).execute()
 
-        if not kyc.get("verified"):
-            db.table("merchants").update({"kyc_status": "failed"}).eq("id", mid).execute()
-            raise HTTPException(status_code=422, detail={
-                "code": "kyc_failed",
-                "message": kyc.get("verificationMessage", "KYC verification failed."),
-            })
-        if not kyc.get("accountAcceptsCredits"):
-            raise HTTPException(status_code=422, detail={
-                "code": "account_no_credits",
-                "message": "This account cannot receive transfers.",
-            })
+            # Only block in prod — test mode always returns verified=false
+            if is_prod:
+                if not kyc.get("verified"):
+                    db.table("merchants").update({"kyc_status": "failed"}).eq("id", mid).execute()
+                    raise HTTPException(status_code=422, detail={
+                        "code": "kyc_failed",
+                        "message": kyc.get("verificationMessage", "KYC verification failed."),
+                    })
+                if not kyc.get("accountAcceptsCredits"):
+                    raise HTTPException(status_code=422, detail={
+                        "code": "account_no_credits",
+                        "message": "This account cannot receive transfers.",
+                    })
+        except PaystackError as e:
+            if is_prod:
+                raise HTTPException(status_code=502, detail={"code": e.code, "message": e.message})
+            # Test mode — Paystack blocked the call (e.g. passport in test, ZAR unsupported)
+            # Store a placeholder so admin knows validation was attempted but blocked
+            db.table("merchants").update({
+                "bank_verified":         False,
+                "bank_holder_match":     None,
+                "bank_accepts_credits":  None,
+                "bank_account_open":     None,
+                "bank_open_3_months":    None,
+                "bank_verification_msg": f"Validation blocked in test mode: {e.message}",
+                "bank_validated_at":     datetime.now(timezone.utc).isoformat(),
+            }).eq("id", mid).execute()
+    elif is_prod:
+        raise HTTPException(status_code=422, detail={"code": "id_required", "message": "ID or passport number is required."})
 
     # ── Step 2: Create Paystack recipient ─────────────────────────────────────
     try:
@@ -135,14 +159,21 @@ async def save_payout_account(body: PayoutAccountRequest, user_id: str = Depends
     bank_name = recipient.get("details", {}).get("bank_name", "")
     masked = f"**** {body.account_number[-4:]}"
 
-    # ── Step 3: Persist ───────────────────────────────────────────────────────
+    # ── Step 3: Invalidate old KYC docs — bank changed, docs must be re-verified
+    existing_docs = db.table("merchant_documents").select("id,s3_key").eq("merchant_id", mid).execute()
+    for doc in (existing_docs.data or []):
+        from app.services.s3_service import delete_object
+        delete_object(doc["s3_key"])
+    db.table("merchant_documents").delete().eq("merchant_id", mid).execute()
+
+    # ── Step 4: Persist ───────────────────────────────────────────────────────
     updates: dict = {
         "payout_bank": bank_name,
         "payout_bank_code": body.bank_code,
         "payout_account_masked": masked,
         "payout_account_name": body.account_holder,
         "paystack_recipient_code": recipient["recipient_code"],
-        "kyc_status": "verified" if is_prod else "pending",
+        "kyc_status": "verified" if is_prod else "pending",  # prod: Paystack validated; test: needs doc re-upload
     }
     if is_prod:
         updates["kyc_verified_at"] = datetime.now(timezone.utc).isoformat()

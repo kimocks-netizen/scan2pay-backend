@@ -90,3 +90,12 @@ class AuthResponse(BaseModel):
     user: PublicUser
     access_token: str
     refresh_token: str
+
+
+class PasswordResetRequestBody(BaseModel):
+    identifier: str  # phone or email
+
+class PasswordResetConfirmBody(BaseModel):
+    identifier: str  # phone or email
+    code: str
+    new_password: str

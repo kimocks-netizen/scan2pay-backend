@@ -88,8 +88,16 @@ async def confirm_kyc_upload(
         "status": "pending",
     }).execute()
 
-    # Reset merchant kyc_status to pending when new docs uploaded
-    db.table("merchants").update({"kyc_status": "pending"}).eq("id", merchant_id).execute()
+    # Recompute kyc_status — new upload resets only if not all others still approved
+    all_docs = db.table("merchant_documents").select("status").eq("merchant_id", merchant_id).execute()
+    statuses = [d["status"] for d in (all_docs.data or [])]
+    if any(s == "rejected" for s in statuses):
+        new_kyc_status = "failed"
+    elif all(s == "approved" for s in statuses) and len(statuses) == len(VALID_DOC_TYPES):
+        new_kyc_status = "verified"
+    else:
+        new_kyc_status = "pending"
+    db.table("merchants").update({"kyc_status": new_kyc_status}).eq("id", merchant_id).execute()
 
     return res.data[0]
 
@@ -152,7 +160,7 @@ async def list_kyc_queue(
 
     merchant_ids = list({r["merchant_id"] for r in rows})
     merchants = db.table("merchants") \
-        .select("id,business_name,kyc_status") \
+        .select("id,business_name,kyc_status,payout_bank,payout_account_masked,payout_account_name,bank_verified,bank_holder_match,bank_accepts_credits,bank_account_open,bank_open_3_months,bank_verification_msg,bank_validated_at") \
         .in_("id", merchant_ids) \
         .execute()
     m_map = {m["id"]: m for m in (merchants.data or [])}

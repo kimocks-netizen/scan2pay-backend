@@ -70,7 +70,36 @@ async def get_my_support_stats(
         .lt("created_at", end) \
         .order("created_at", desc=True) \
         .execute()
-    assigned_count = len(assigned.data or [])
+
+    assigned_merchants = assigned.data or []
+
+    # Enrich with first transaction date — only merchants who transacted count toward commission
+    merchant_ids = [m["id"] for m in assigned_merchants]
+    first_txns: dict[str, str] = {}
+    if merchant_ids:
+        txn_res = db.table("transactions") \
+            .select("merchant_id,created_at") \
+            .in_("merchant_id", merchant_ids) \
+            .eq("status", "success") \
+            .order("created_at") \
+            .execute()
+        for t in (txn_res.data or []):
+            if t["merchant_id"] not in first_txns:
+                first_txns[t["merchant_id"]] = t["created_at"]
+
+    recent_signups = [
+        {
+            "id": m["id"],
+            "business_name": m["business_name"],
+            "created_at": m["created_at"],
+            "has_transacted": m["id"] in first_txns,
+            "first_transaction_at": first_txns.get(m["id"]),
+        }
+        for m in assigned_merchants
+    ][:10]
+
+    # Only count merchants who have made at least one successful transaction
+    assigned_count = sum(1 for m in assigned_merchants if m["id"] in first_txns)
 
     # Unassigned merchants this period (no referred_by)
     unassigned_res = db.table("merchants") \
@@ -118,7 +147,7 @@ async def get_my_support_stats(
         "threshold": BONUS_THRESHOLD,
         "bonus_units": bonus_units,
         "rollover_out": rollover_out,
-        "recent_signups": (assigned.data or [])[:10],
+        "recent_signups": recent_signups,
     }
 
 
