@@ -8,6 +8,7 @@ from app.core.deps import require_admin, require_staff
 from app.db.connection import get_db
 from app.services.paystack_service import initiate_transfer, get_balance, PaystackError
 from app.services.settlement_service import run_settlements
+from app.services.sms_service import send_sms
 
 router = APIRouter()
 settings = get_settings()
@@ -354,6 +355,22 @@ async def update_withdrawal_status(
 
     now = datetime.now(timezone.utc).isoformat()
 
+    async def _notify_merchant(status: str):
+        try:
+            mch = db.table("merchants").select("user_id").eq("id", wd["merchant_id"]).execute()
+            if not mch.data: return
+            usr = db.table("users").select("phone").eq("id", mch.data[0]["user_id"]).execute()
+            if not usr.data: return
+            amount = f"R{wd['amount_cents'] / 100:.2f}"
+            if status == "approved":
+                msg = f"Your Scan2Pay withdrawal of {amount} has been approved and is being processed to your bank account."
+            else:
+                reason = body.reason or "Please contact support for more information."
+                msg = f"Your Scan2Pay withdrawal of {amount} was declined. Reason: {reason}"
+            await send_sms(usr.data[0]["phone"], msg)
+        except Exception:
+            pass  # non-fatal
+
     if body.status == "rejected":
         res = db.table("withdrawals").update({
             "status": "rejected",
@@ -361,6 +378,7 @@ async def update_withdrawal_status(
             "decided_at": now,
             "decided_by": admin_id,
         }).eq("id", withdrawal_id).execute()
+        await _notify_merchant("rejected")
         return res.data[0]
 
     # ── Approve: fetch merchant recipient code ────────────────────────────────
@@ -377,13 +395,13 @@ async def update_withdrawal_status(
         })
 
     if SIMULATE_TRANSFERS:
-        # Test mode — skip Paystack, mark approved with simulated transfer code
         res = db.table("withdrawals").update({
             "status": "approved",
             "transfer_code": "SIMULATED",
             "decided_at": now,
             "decided_by": admin_id,
         }).eq("id", withdrawal_id).execute()
+        await _notify_merchant("approved")
         return res.data[0]
 
     # ── Prod: initiate real Paystack transfer ─────────────────────────────────
@@ -403,4 +421,5 @@ async def update_withdrawal_status(
         "decided_at": now,
         "decided_by": admin_id,
     }).eq("id", withdrawal_id).execute()
+    await _notify_merchant("approved")
     return res.data[0]

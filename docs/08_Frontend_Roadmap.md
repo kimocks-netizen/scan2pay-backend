@@ -1,136 +1,142 @@
-# scan2pay-web — Migration Roadmap
+# scan2pay-web — Frontend Roadmap
+
+> Single source of truth for frontend state, routes, and pending work.
+> Last updated: September 2026
 
 ## Stack
-Next.js 15 App Router · TypeScript · Tailwind v4 · shadcn/ui · TanStack Query v5 · Zustand · React Hook Form · Zod · next-themes
+Next.js 15 App Router · TypeScript · Tailwind v4 · shadcn/ui · TanStack Query v5 · Zustand · Recharts · qrcode · @paystack/inline-js
 
-## Architecture Pattern
-Hybrid: `features/<domain>/schemas.ts` co-location (orderflow-ui style) + separate `providers/` folder (predictiq style)
+## Live API
+`https://8fhbnwufgi.execute-api.af-south-1.amazonaws.com/Prod`
+AWS account: `542727784619` · profile: `predictiq` · region: `af-south-1`
+Deploy: `bash scripts/deploy.sh` from `scan2pay-backend/`
 
----
-
-## ✅ Done
-
-### Project Setup
-- [x] Next.js 15 scaffolded with TypeScript, Tailwind, ESLint, App Router, `src/` dir, `@/*` alias
-- [x] All runtime deps installed (TanStack Query, Zustand, next-themes, React Hook Form, Zod, Recharts, qrcode, Radix primitives, etc.)
-- [x] Dev deps installed (`@types/qrcode`, `@tanstack/react-query-devtools`, `prettier`, `prettier-plugin-tailwindcss`)
-- [x] shadcn/ui initialised with `--defaults`
-- [x] `.prettierrc` + `.prettierignore` copied
-
-### Copied from Scan2Pay-frontend (no changes needed)
-- [x] `src/components/ui/` — all 45 shadcn/ui primitives
-- [x] `src/components/shared/` — Logo, QrCode, QrPoster, ThemeToggle, AdminCharts
-- [x] `src/hooks/use-mobile.tsx`
-- [x] `src/lib/utils.ts`
-- [x] `src/lib/format.ts`
-- [x] `src/lib/api/types.ts`
-- [x] `src/assets/` — hero-vendor, kit-lanyard-bib, use-petrol, use-taxi, use-tips
-- [x] `mock/` — all JSON fixtures (audit-log, merchants, payment-codes, plans, pricing, products, transactions, users, withdrawals)
-- [x] `docs/` — admin.md, api.md, architecture.md, database.md, payments.md, README.md
+## Environment Variables
+```env
+NEXT_PUBLIC_API_URL=https://8fhbnwufgi.execute-api.af-south-1.amazonaws.com/Prod
+NEXT_PUBLIC_PAY_BASE_URL=https://scan2pay.site/pay
+NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY=pk_test_23c73dd403061843824f61e3cb4cd96bd5220110
+```
 
 ---
 
-## 🔲 To Build
+## ✅ Phase 1 — Merchant (COMPLETE)
 
-### Foundation Layer
-- [x] `src/lib/constants.ts` — API base URL, app name, route constants
-- [x] `src/lib/api-client.ts` — fetch wrapper with auth headers + error handling
-- [x] `src/lib/query-client.ts` — TanStack QueryClient singleton config
-
-### Zustand Stores (`src/stores/`)
-- [x] `useAuthStore.ts` — token, user, login/logout actions
-- [x] `useUIStore.ts` — sidebar open/close, active modal
-- [x] `useThemeStore.ts` — dark/light preference
-
-### Providers (`src/providers/`)
-- [x] `QueryProvider.tsx` — TanStack QueryClient + Devtools
-- [x] `ThemeProvider.tsx` — next-themes wrapper
-- [x] `AuthProvider.tsx` — session hydration on mount
-- [x] `Providers.tsx` — combined root wrapper
-
-### App Shell (`src/app/layout.tsx`)
-- [x] Wire `<Providers>` into root layout
-- [x] Set metadata (title, description, icons)
-- [x] Apply font + base HTML attributes
-
-### Types (`src/types/`)
-- [x] `auth.ts` — AuthTokens, AuthResponse, LoginPayload, RegisterPayload
-- [x] `api.ts` — ApiError, ApiErrorResponse, PaginatedResponse
-- [x] `domain.ts` — re-exports all domain types + MerchantStats, Payout, PaymentInitResponse
-
-### Middleware (`src/middleware.ts`)
-- [x] Protect authenticated routes
-- [x] Redirect unauthenticated users to `/login`
-- [x] Redirect authenticated users away from `/login`
-
-### Layout Components (`src/components/layout/`)
-- [x] `AppShell.tsx` — merchant-facing shell (Navbar + Sidebar + mobile nav)
-- [ ] `AdminShell.tsx` — admin-facing shell
-
-### Features (`src/features/`)
-
-#### `auth/`
-- [x] `schemas.ts` — login/register Zod schemas
-- [x] `api.ts` — login, logout, refresh endpoints
-- [x] `mutations.ts` — useLoginMutation, useLogoutMutation, useRegisterMutation
-
-#### `dashboard/`
-- [x] `api.ts` — transactions + payment codes endpoints
-- [x] `queries.ts` — useDashboardTransactions, useDashboardCodes
-
-#### `transactions/`
-- [x] inline in page (queries via api-client)
-
-#### `payment-codes/`
-- [x] inline in page
-
-#### `withdrawals/`
-- [x] inline in page
-
-#### `merchants/`
-- [ ] `schemas.ts`
-- [ ] `api.ts`
-- [ ] `queries.ts` + `mutations.ts`
-- [ ] `components/` — MerchantTable, MerchantForm
-
-#### `plans/` (admin)
-- [ ] `schemas.ts`
-- [ ] `api.ts`
-- [ ] `queries.ts` + `mutations.ts`
-- [ ] `components/` — PlanTable, PlanForm
-
-#### `users/` (admin)
-- [ ] `api.ts`
-- [ ] `queries.ts`
-- [ ] `components/` — UserTable
-
-### App Routes (`src/app/`)
-- [x] `/` — home / landing page
-- [x] `(auth)/login/page.tsx`
-- [x] `(merchant)/dashboard/page.tsx`
-- [x] `(merchant)/charge/page.tsx`
-- [x] `(merchant)/my-code/page.tsx`
-- [x] `(merchant)/transactions/page.tsx`
-- [x] `(merchant)/payment-codes/page.tsx`
-- [x] `(merchant)/withdrawals/page.tsx`
-- [x] `(merchant)/settings/page.tsx`
-- [ ] `(admin)/admin/dashboard/page.tsx`
-- [ ] `(admin)/admin/merchants/page.tsx`
-- [ ] `(admin)/admin/users/page.tsx`
-- [ ] `(admin)/admin/plans/page.tsx`
-- [ ] `(admin)/admin/transactions/page.tsx`
-- [ ] `(admin)/admin/withdrawals/page.tsx`
-- [ ] `(admin)/admin/pricing/page.tsx`
-- [ ] `(admin)/admin/audit/page.tsx`
+| Route | Description |
+|---|---|
+| `/dashboard` | Stats, 30-day chart, top codes/tips, recent payments. Tip vs vendor layout |
+| `/charge` | Charge session, QR countdown, live per-row expiry badge |
+| `/my-code` | Primary QR poster, print/download/share buttons |
+| `/catalog` | Product CRUD, QR poster modal/drawer, regenerate QR |
+| `/transactions` | Paginated, status/method/type/settlement filters |
+| `/settings` | Business profile, payout account (modal + mobile drawer), plan card, KYC document upload (id_document, proof_of_bank, selfie with status badges + view button). Approved docs cannot be replaced. |
+| `/withdrawals` | Balance cards, request form, history, cancel with confirmation modal |
+| `/reports` | Period selector, gross/fees/net cards, charts, CSV export |
+| `/pay/[reference]` | Public pay page, all three modes, charge session overlay |
 
 ---
 
-## Build Order
+## ✅ Phase 2 — Admin Console (COMPLETE)
 
-1. `types/` → `lib/constants.ts` → `lib/api-client.ts` → `lib/query-client.ts`
-2. `stores/` (auth, ui, theme)
-3. `providers/` → wire into `app/layout.tsx`
-4. `middleware.ts`
-5. `components/layout/` (shells + nav)
-6. `features/auth/` → `(auth)/login/page.tsx`
-7. Remaining features + routes (dashboard → transactions → payment-codes → withdrawals → merchants → admin)
+### Navigation (role-based)
+- **Admin:** Overview → Revenue → Transactions → Payouts → People → Pricing → Providers → Audit log → KYC queue → CMS → Support stats
+- **Support:** Overview → People → Transactions → KYC queue → CMS → My stats
+
+### Mobile nav
+Both admin and support use the same bottom-bar + More sheet pattern as the merchant shell (first 4 items in bar, rest in sheet with logout).
+
+### Pages
+
+| Route | Description |
+|---|---|
+| `/admin/dashboard` | Revenue KPIs, Paystack balance, merchant KPIs, fees chart, merchant growth chart, per-merchant revenue table. Mobile: card view for recent transactions |
+| `/admin/revenue` | Monthly revenue bar (12mo), daily fees + volume area (30d), client growth bar (12mo), txn success vs failed line (12mo). Colour-coded stat chips per chart |
+| `/admin/transactions` | Platform-wide, merchant filter dropdown, status filter, 10/25/50 page size, pagination |
+| `/admin/withdrawals` | Combined Payouts page — Withdrawals + Settlements tabs. Merchant filter, status filter, 10/25/50 page size, approve/reject actions |
+| `/admin/settlements` | Redirects to `/admin/withdrawals` |
+| `/admin/people` | Tabbed Businesses + Users. Search, filter pills, server-side pagination (10/25/50). Users show user_type pill |
+| `/admin/pricing` | Pricing versions history, publish new version form |
+| `/admin/providers` | Paystack balance, success rate, method mix table, recent failures |
+| `/admin/audit` | webhook_events log, status filter |
+| `/admin/kyc` | Grouped by merchant (one card per merchant, docs as rows inside). Status filter, view doc (presigned GET + Glacier restore notice), approve, reject with reason modal |
+| `/admin/cms` | 4 image slots (hero, feature_1, feature_2, banner). Local preview before upload, confirm/cancel, full-screen preview modal, alt text input |
+| `/admin/support-stats` | All agents' commission breakdown, period selector (admin only) |
+| `/admin/my-stats` | QR encodes full signup URL with `?ref=<code>`. Full-width QR card with logo + URL printed below. Full-width buttons on mobile. Progress bar, rollover display, recent signups table (support only) |
+
+### Key component notes
+- `AdminShell` — desktop sidebar + mobile bottom nav (same pattern as `AppShell`)
+- `ChartPanel` — accepts `stat` prop with `color` for colour-coded top-right values
+- `PaginationBar` — inline in withdrawals page, reusable pattern
+
+---
+
+## ✅ Home / Marketing Pages
+
+| Route | Description |
+|---|---|
+| `/` | Placeholder with header + hero (CMS hero slot as background overlay if available) |
+| `/home` | Full marketing page. Fetches `GET /cms/homepage` server-side (`force-dynamic`, `no-store`). CMS slots: hero → hero image, feature_1/2/banner → story cards. Falls back to static assets |
+
+CMS images use `force-dynamic` + `cache: "no-store"` so new uploads appear immediately.
+
+---
+
+## ✅ Phase 3 — Referral Signup Flow (COMPLETE)
+
+- [x] Backend: `POST /auth/register` accepts optional `referral_code` → stores `referred_by` on merchant (validated against existing users)
+- [x] Frontend: `?ref=<support_user_id>` pre-read from URL on register page, passed silently through mutation
+- [x] QR deep-link encodes full URL: `/login?mode=register&ref=<code>`
+
+---
+
+## 🔲 Phase 4 — Notifications & Automation
+
+- [ ] WinSMS on KYC approval/rejection (`PATCH /admin/kyc/{id}`)
+- [ ] WinSMS on withdrawal approved
+- [ ] Fix `settlement_service.py` — uses `merchant["plan"]`, should be `merchant["plan_id"]`
+- [ ] Merchant plan upgrade flow (self-serve request → support/admin approves)
+- [ ] Wire `GET /cms/homepage` to scan2pay.site marketing site
+
+---
+
+## 🔲 Phase 5 — Production Readiness
+
+- [ ] Paystack live keys
+- [ ] `POST /apple-pay/domain` — register `scan2pay.site`
+- [ ] Custom domain for API Gateway
+- [ ] Error monitoring (Sentry or CloudWatch alarms)
+- [ ] Rate limiting (API Gateway usage plans)
+- [ ] Paystack webhook URL confirmed in Paystack dashboard
+- [ ] Verify settlement cron running in prod (CloudWatch logs)
+- [ ] KYC bank validation in prod (test mode always returns `verified=false`)
+
+---
+
+## API Wiring Status
+
+### Auth ✅
+`POST /auth/register` · `POST /auth/login` · `POST /auth/refresh` · `POST /auth/logout` · `GET /auth/me` · `POST /auth/otp/request` · `POST /auth/otp/verify`
+
+### Merchant ✅
+`GET/PATCH /merchants/me` · `PATCH /merchants/me/payout-account` · `GET /merchants/me/balance`
+
+### KYC ✅
+`POST /merchants/me/documents/upload-url` · `POST /merchants/me/documents` · `GET /merchants/me/documents` · `GET /merchants/me/documents/{doc_id}/file`
+
+### Payment Codes ✅
+`GET/POST/PATCH/DELETE /merchants/me/payment-codes` · `GET /pay/:reference`
+
+### Charges & Payments ✅
+`POST /charges` · `POST /payments/initialise` · `GET /payments/:id` · `POST /pay/:reference/initialise`
+
+### Transactions ✅
+`GET /merchants/me/transactions` (paginated, filters)
+
+### Products ✅
+`GET/POST/PATCH/DELETE /merchants/me/products`
+
+### Withdrawals ✅
+`GET/POST/DELETE /merchants/me/withdrawals` · `GET /billing/banks`
+
+### Admin ✅
+All endpoints — see `09_Backend_Roadmap.md` for full list

@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from app.core.config import get_settings
 from app.core.deps import require_staff
 from app.db.connection import get_db
-from app.services.s3_service import presign_put, presign_get, delete_object, make_cms_id
+from app.services.s3_service import presign_put, delete_object, make_cms_id
 
 router = APIRouter()
 
@@ -37,10 +38,9 @@ async def get_homepage_assets():
     full_res = db.table("cms_assets").select("slot,s3_key,filename,alt_text,uploaded_at").eq("active", True).execute()
     result = {}
     for row in (full_res.data or []):
-        try:
-            url = presign_get(row["s3_key"])
-        except Exception:
-            url = None
+        s3_key = row["s3_key"]
+        # cms/ objects are publicly readable — use permanent URL, no expiry
+        url = f"https://s3.af-south-1.amazonaws.com/{settings.assets_bucket}/{s3_key}"
         result[row["slot"]] = {
             "url": url,
             "filename": row["filename"],

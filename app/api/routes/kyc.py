@@ -9,6 +9,7 @@ from app.services.s3_service import (
     presign_put, presign_get, glacier_status, restore_from_glacier,
     delete_object, make_doc_id,
 )
+from app.services.sms_service import send_sms
 
 router = APIRouter()
 
@@ -233,5 +234,22 @@ async def review_kyc_document(
         "kyc_status": kyc_status,
         "kyc_verified_at": now if kyc_status == "verified" else None,
     }).eq("id", merchant_id).execute()
+
+    # SMS notification to merchant
+    user_res = db.table("users").select("phone").eq(
+        "id",
+        db.table("merchants").select("user_id").eq("id", merchant_id).execute().data[0]["user_id"]
+    ).execute()
+    if user_res.data:
+        phone = user_res.data[0]["phone"]
+        if kyc_status == "verified":
+            msg = "Your Scan2Pay KYC verification is complete. Your account is now fully verified and withdrawal limits have been lifted."
+        elif kyc_status == "failed":
+            reason = body.rejection_reason or "Please resubmit the required documents."
+            msg = f"Your Scan2Pay KYC document was rejected. Reason: {reason} Please log in to resubmit."
+        else:
+            msg = None
+        if msg:
+            await send_sms(phone, msg)
 
     return {"doc_id": doc_id, "status": body.status, "merchant_kyc_status": kyc_status}

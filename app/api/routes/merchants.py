@@ -44,7 +44,26 @@ class PayoutAccountRequest(BaseModel):
     document_type: str = "identityNumber"  # identityNumber | passportNumber
 
 
+class ReferralUpdate(BaseModel):
+    referral_code: str
+
+
 # ── /me routes (must be before /{merchant_id} wildcard) ──────────────────────
+
+@router.patch("/me/referral")
+async def set_referral(body: ReferralUpdate, user_id: str = Depends(get_current_user_id)):
+    db = get_db()
+    merchant = _get_merchant(user_id, db)
+    # Only set if not already referred
+    if merchant.get("referred_by"):
+        return {"referred_by": merchant["referred_by"]}
+    # Validate the code is a real user
+    ref = db.table("users").select("id").eq("id", body.referral_code).execute()
+    if not ref.data:
+        raise HTTPException(status_code=422, detail={"code": "invalid_referral", "message": "Invalid referral code."})
+    res = db.table("merchants").update({"referred_by": body.referral_code}).eq("id", merchant["id"]).execute()
+    return {"referred_by": res.data[0]["referred_by"]}
+
 
 @router.get("/me")
 async def get_my_merchant(user_id: str = Depends(get_current_user_id)):

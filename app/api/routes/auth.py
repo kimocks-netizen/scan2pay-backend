@@ -164,7 +164,7 @@ async def register(body: RegisterRequest, request: Request):
     db.table("user_roles").insert({"id": ur_id, "user_id": user_id, "role": "merchant"}).execute()
 
     # insert merchant
-    slug = user_id  # simple unique slug; can be prettified later
+    slug = user_id
     db.table("merchants").insert({
         "id": merchant_id,
         "user_id": user_id,

@@ -1,13 +1,13 @@
-# scan2pay-backend — Build Roadmap
+# scan2pay-backend — Backend Roadmap
 
----
+> Single source of truth for backend state, endpoints, and pending work.
+> Last updated: September 2026
 
-## ⚠️ Working Rules
-
-1. **Third-party APIs** — if unsure about the exact payload, auth format, or endpoint behaviour of any external API (WinSMS, Paystack, etc.), **ask the user first**. Do not guess.
-2. **Unclear requirements** — if the scope of a feature is ambiguous, **ask before writing any code**.
+## Working Rules
+1. **Third-party APIs** — if unsure about exact payload, auth format, or endpoint behaviour (WinSMS, Paystack, etc.), ask the user first. Do not guess.
+2. **Unclear requirements** — if scope is ambiguous, ask before writing code.
 3. **Scope** — only build what was explicitly asked for in the current session.
-4. **Existing patterns** — before implementing anything new, check how it is already done in the codebase.
+4. **Existing patterns** — check how it's already done before implementing anything new.
 
 ---
 
@@ -17,7 +17,33 @@ Python 3.13 · FastAPI · Mangum · Supabase (Postgres) · Paystack · WinSMS ·
 ## Deployment
 - Stack: `scan2pay-backend` · Region: `af-south-1` · Account: `542727784619` (profile: `predictiq`)
 - API: `https://8fhbnwufgi.execute-api.af-south-1.amazonaws.com/Prod`
-- Deploy: `sam build --no-cached && sam deploy --profile predictiq --config-file samconfig.toml --parameter-overrides "Environment=dev" --force-upload`
+- Deploy: `bash scripts/deploy.sh`
+
+## Quick Tokens
+```bash
+API=https://8fhbnwufgi.execute-api.af-south-1.amazonaws.com/Prod
+
+VENDOR_TOKEN=$(curl -s -X POST $API/auth/login -H "Content-Type: application/json" \
+  -d '{"identifier":"0821000001","password":"Vendor1234!"}' | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+
+ADMIN_TOKEN=$(curl -s -X POST $API/auth/login -H "Content-Type: application/json" \
+  -d '{"identifier":"0616583827","password":"Admin1234"}' | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+
+SUPPORT_TOKEN=$(curl -s -X POST $API/auth/login -H "Content-Type: application/json" \
+  -d '{"identifier":"0600000001","password":"Support1234!"}' | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+```
+
+## Test Credentials
+| Role    | Phone      | Password     |
+|---------|------------|--------------|
+| Vendor  | 0821000001 | Vendor1234!  |
+| Tip     | 0660404333 | 123456       |
+| Admin   | 0616583827 | Admin1234    |
+| Support | 0600000001 | Support1234! |
+
+OTP bypass: `0000`
+
+---
 
 ## Lambda Architecture
 | Lambda | Trigger | Purpose |
@@ -25,105 +51,142 @@ Python 3.13 · FastAPI · Mangum · Supabase (Postgres) · Paystack · WinSMS ·
 | `Scan2PayApiFunction` | API Gateway `/{proxy+}` | Entire FastAPI app via Mangum |
 | `ExpireChargesFunction` | EventBridge every 1 min | Set `active=false` on codes past `expires_at` |
 | `ReconcilePaystackFunction` | EventBridge every 15 min | Verify `pending` payments older than 10 min |
-| `BuildSettlementsFunction` | EventBridge daily **18:00 UTC (20:00 SAST)** | Settle eligible transactions (T+2 clearing) |
+| `BuildSettlementsFunction` | EventBridge daily 18:00 UTC (20:00 SAST) | Settle eligible transactions (T+2 clearing) |
 
 ---
 
-## Phase 1 — Merchant ✅ COMPLETE
+## ✅ Phase 1 — Merchant (COMPLETE)
 
-### Routes (all live)
-| Route file | Endpoints | Status |
-|---|---|---|
-| `health.py` | `GET /health` | ✅ |
-| `auth.py` | register, login, refresh, logout, me, otp | ✅ |
-| `merchants.py` | `GET/PATCH /merchants/me`, `PATCH /me/payout-account`, `GET /me/balance`, `GET /:id` | ✅ |
-| `products.py` | CRUD `/merchants/me/products`, regenerate-qr | ✅ |
-| `payment_codes.py` | CRUD `/merchants/me/payment-codes` | ✅ |
-| `charges.py` | `POST /charges`, charge session flow | ✅ |
-| `payments.py` | `POST /payments/initialise`, `GET /payments/:id` | ✅ |
-| `transactions.py` | paginated + filters (status/method/type/settlement) | ✅ |
-| `withdrawals.py` | `GET/POST/DELETE /merchants/me/withdrawals` | ✅ |
-| `billing.py` | `GET /billing/banks` — 33 SA banks proxy | ✅ |
-| `webhooks.py` | charge.success, transfer.success/failed/reversed | ✅ |
-| `admin.py` | settlements pending/run, withdrawals approve/reject | ✅ partial |
-
-### Migrations run
-- `001` through `012` ✅
-- `013_payout_kyc_withdrawals.sql` ✅ — payout_account_name, kyc_status, transfer_code, failure_reason, expanded withdrawal status
-
-### Cron Lambdas
-- `expire_charges.py` ✅
-- `reconcile_paystack.py` ✅
-- `build_settlements.py` ✅ — simplified, uses `settlement_service.run_settlements()`, T+2 clearing
-
----
-
-## Phase 2 — Admin Console 🔴 NEXT
-
-### Backend needed
-| Endpoint | Notes |
+### Routes
+| File | Endpoints |
 |---|---|
-| `GET /admin/merchants` | list all, plan + status |
-| `PATCH /admin/merchants/{id}` | suspend/activate + plan change |
-| `GET /admin/users` | list all users with role |
-| `PATCH /admin/users/{id}` | suspend/activate |
-| `GET /admin/transactions` | platform-wide, all merchants, same filters |
-| `GET /admin/balance` | Paystack `GET /balance` → ZAR cents |
-| `GET /admin/audit` | `webhook_events` table, paginated |
+| `health.py` | `GET /health` |
+| `auth.py` | register, login, refresh, logout, me, otp/request, otp/verify |
+| `merchants.py` | `GET/PATCH /merchants/me`, `PATCH /me/payout-account`, `GET /me/balance`, `GET /:id` |
+| `products.py` | CRUD `/merchants/me/products`, regenerate-qr |
+| `payment_codes.py` | CRUD `/merchants/me/payment-codes` |
+| `charges.py` | `POST /charges`, charge session flow |
+| `payments.py` | `POST /payments/initialise`, `GET /payments/:id` |
+| `transactions.py` | Paginated + filters (status/method/type/settlement) |
+| `withdrawals.py` | `GET/POST/DELETE /merchants/me/withdrawals` |
+| `billing.py` | `GET /billing/banks` — 33 SA banks proxy |
+| `webhooks.py` | charge.success, transfer.success/failed/reversed |
 
-### Frontend pages to wire
-| Page | Status |
-|------|--------|
-| `/admin/dashboard` | mockApi → real stats + Paystack balance card |
-| `/admin/merchants` | mockApi → real list, suspend, plan |
-| `/admin/users` | mockApi → real list, suspend |
-| `/admin/transactions` | mockApi → platform-wide list |
-| `/admin/withdrawals` | mockApi → approve/reject queue (backend ✅) |
-| `/admin/settlements` | partially wired ✅ |
-| `/admin/audit` | mockApi → webhook_events log |
-| `/admin/providers` | mockApi → Paystack balance |
+### Migrations
+- `001` through `013` ✅ — includes payout_account_name, kyc_status, transfer_code, failure_reason, expanded withdrawal status
 
 ---
 
-## Phase 3 — Support role 🔲
-- Read-only: transactions, merchants, users
-- No financial actions
-- Route guard already in `MERCHANT_ROUTES_BY_TYPE`
+## ✅ Phase 2 — Admin Console (COMPLETE)
 
-## Phase 4 — Production readiness 🔲
-- Paystack live keys
-- `POST /apple-pay/domain` — register scan2pay.site
-- Verify webhook URL in Paystack dashboard
-- Verify `build_settlements` cron running in prod (CloudWatch logs)
-- Custom domain for API Gateway
-
----
-
-## Bugs Fixed (session log)
-
-| Bug | Fix |
+### Routes
+| File | Endpoints |
 |---|---|
-| `.single()` on Supabase throws if row exists | Replaced all `.single()` with `.execute()` + index `[0]` |
-| Boolean metadata causes Paystack 500 | Convert to strings `"true"`/`"false"` |
-| `apple_pay`/`google_pay` channels cause Paystack 500 on ZAR test | Use `["card"]` only |
-| Global exception handler swallowing HTTPException | Added isinstance check in handler |
-| Webhook `.single()` on payment_codes throws, swallows charge.success | Fixed + wrapped handlers in try/except |
-| STP000021 stuck pending (webhook fired before fix deployed) | Manually patched via Supabase REST API |
-| `transactions` endpoint returning `count` not `total` | Fixed — now returns `total` from `count="exact"` |
-| Duplicate `GET /pay/{reference}` route in payment_codes.py | Removed — charges.py version has charge session logic |
-| `/merchants/me` 404 — wildcard `/{merchant_id}` catching `/me` | Fixed route order — `/me` routes registered before wildcard |
-| `document_type` hardcoded as `identityNumber` in KYC | Now driven by frontend toggle (SA ID / Passport) |
+| `admin.py` | `GET /admin/merchants` + `PATCH /admin/merchants/{id}` |
+| | `GET /admin/users` + `PATCH /admin/users/{id}` |
+| | `GET /admin/transactions` (paginated, filters: status/method/merchant_id/since) |
+| | `GET /admin/balance` — Paystack ZAR balance |
+| | `GET /admin/audit` — webhook_events log |
+| | `GET /admin/settlements/pending` + `POST /admin/settlements/run` |
+| | `GET /admin/withdrawals` (paginated, merchant_id + status filter) + `PATCH /admin/withdrawals/{id}/status` |
+| | `GET /admin/pricing` + `POST /admin/pricing` + `GET /admin/plans` |
+| | `GET /admin/support-stats` |
+| `kyc.py` | `POST /merchants/me/documents/upload-url` + `POST /merchants/me/documents` |
+| | `GET /merchants/me/documents` + `GET /merchants/me/documents/{doc_id}/file` |
+| | `GET /admin/kyc` + `GET /admin/kyc/{doc_id}/file` + `PATCH /admin/kyc/{doc_id}` |
+| `cms.py` | `GET /cms/homepage` (public) |
+| | `POST /admin/cms/upload-url` + `POST /admin/cms/confirm` + `GET /admin/cms` |
+| `support.py` | `GET /support/me` + `GET /support/my-stats` |
+
+### Access control
+- `require_staff` — admin or support. Used on all read endpoints.
+- `require_admin` — admin only. Used on all write/financial endpoints.
+
+### Migrations
+- `014` ✅ — `fee_owed_cents`, `fee_last_charged_at`, `plan` columns on merchants
+- `015` ✅ — `referred_by` on merchants, `merchant_documents`, `cms_assets`, `support_commissions`
+
+### S3 Bucket
+- Name: `scan2pay-assets-dev-542727784619`
+- Key structure: `kyc/{merchant_id}/{doc_type}/{doc_id}/{filename}` · `cms/homepage/{slot}/{cms_id}/{filename}`
+- CORS: GET, PUT, HEAD · `AllowedOrigins: ['*']`
+- Lifecycle: KYC → GLACIER_IR 90d → GLACIER 365d → delete 730d; CMS → GLACIER_IR 90d
+- Presigned URLs use regional endpoint `https://s3.af-south-1.amazonaws.com` (required for opt-in regions)
+- `presign_put` signs `ContentType` — frontend must send matching `Content-Type` header
+
+### Commission logic
+- `referral_code` = support user_id
+- Merchants with `referred_by` → assigned to that support agent
+- Merchants without → unassigned pool ÷ active support agents
+- Monthly: `total = assigned + pool_share + rollover_in`
+- `bonus_units = floor(total / 1000)`, `rollover_out = total % 1000`
 
 ---
 
-## SSM Parameters (all stored ✅)
+## ✅ Phase 3 — Referral Signup Flow (COMPLETE)
+
+- [x] `POST /auth/register` — accepts optional `referral_code`, validates it exists as a user, stores as `referred_by` on merchant
+- [x] Signup URL format: `/login?mode=register&ref=<support_user_id>`
+
+---
+
+## ✅ Phase 4 — Notifications & Automation (COMPLETE)
+
+- [x] **WinSMS on KYC decision** — SMS sent in `PATCH /admin/kyc/{doc_id}` when status → verified or failed
+- [x] **WinSMS on withdrawal decision** — SMS sent in `PATCH /admin/withdrawals/{id}/status` when approved or rejected
+- [x] **Settlement fee fix** — `settlement_service.py` already uses `plan_id` correctly
+- [x] **OTP during registration** — built and wired end-to-end (bypass: `0000` in dev)
+- [ ] Merchant notification preferences (SMS default, email/WhatsApp future) — settings page
+- [ ] Merchant plan upgrade flow (self-serve request → support/admin approves)
+
+---
+
+## 🔲 Phase 5 — Production Readiness
+
+- [ ] Paystack live keys (swap SSM params)
+- [ ] `POST /apple-pay/domain` — register `scan2pay.site`
+- [ ] Custom domain for API Gateway
+- [ ] Paystack webhook URL confirmed in Paystack dashboard
+- [ ] Verify settlement cron running in prod (CloudWatch logs)
+- [ ] KYC bank validation — test mode always returns `verified=false`
+- [ ] Rate limiting (API Gateway usage plans)
+- [ ] Error monitoring (CloudWatch alarms or Sentry)
+
+---
+
+## SSM Parameters
 ```
 /scan2pay/dev/SUPABASE_URL
 /scan2pay/dev/SUPABASE_ANON_KEY
 /scan2pay/dev/SUPABASE_SERVICE_ROLE_KEY
 /scan2pay/dev/JWT_SECRET
 /scan2pay/dev/WINSMS_API_KEY
-/scan2pay/dev/PAYSTACK_SECRET_KEY        → sk_test_5007f89004bd371737871acffe64a98fd2ec3a36
-/scan2pay/dev/PAYSTACK_PUBLIC_KEY        → pk_test_23c73dd403061843824f61e3cb4cd96bd5220110
-/scan2pay/dev/PAYSTACK_WEBHOOK_SECRET    → same value as PAYSTACK_SECRET_KEY ✅
+/scan2pay/dev/PAYSTACK_SECRET_KEY     → sk_test_5007f89004bd371737871acffe64a98fd2ec3a36
+/scan2pay/dev/PAYSTACK_PUBLIC_KEY     → pk_test_23c73dd403061843824f61e3cb4cd96bd5220110
+/scan2pay/dev/PAYSTACK_WEBHOOK_SECRET → same as PAYSTACK_SECRET_KEY
 ```
+
+---
+
+## DB Column Notes
+- `transactions.platform_fee_cents` (not `fee_cents`)
+- `merchants.plan_id` (not `plan`)
+- `webhook_events.provider_reference` (not `reference`)
+
+---
+
+## Bugs Fixed
+| Bug | Fix |
+|---|---|
+| `.single()` on Supabase throws if row exists | Replaced all with `.execute()` + index `[0]` |
+| Boolean metadata causes Paystack 500 | Convert to strings `"true"`/`"false"` |
+| `apple_pay`/`google_pay` channels cause Paystack 500 on ZAR test | Use `["card"]` only |
+| Global exception handler swallowing HTTPException | Added isinstance check |
+| Webhook `.single()` on payment_codes swallows charge.success | Fixed + wrapped in try/except |
+| `transactions` endpoint returning `count` not `total` | Fixed — returns `total` from `count="exact"` |
+| Duplicate `GET /pay/{reference}` route | Removed from payment_codes.py |
+| `/merchants/me` 404 — wildcard catching `/me` | Fixed route order |
+| `document_type` hardcoded as `identityNumber` | Now driven by frontend toggle |
+| S3 presigned PUT 400 — `ContentType` not signed | `presign_put` now signs `ContentType` |
+| S3 `IllegalLocationConstraintException` | S3 client uses regional endpoint `s3.af-south-1.amazonaws.com` |
+| CMS images not updating after upload | `force-dynamic` + `cache: "no-store"` on home pages |
