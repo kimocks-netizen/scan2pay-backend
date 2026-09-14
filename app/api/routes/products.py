@@ -1,5 +1,5 @@
 import secrets
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.core.deps import get_current_user_id
@@ -45,20 +45,48 @@ def _make_qr_reference() -> str:
 
 
 @router.get("/merchants/me/products")
-async def list_products(user_id: str = Depends(get_current_user_id)):
+async def list_products(
+    active: str | None = Query(None),
+    category: str | None = Query(None),
+    q: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    user_id: str = Depends(get_current_user_id),
+):
     db = get_db()
     mid = _merchant_id(user_id, db)
-    products = db.table("products").select("*").eq("merchant_id", mid).order("created_at", desc=True).execute()
-    if not products.data:
-        return []
-    product_ids = [p["id"] for p in products.data]
+
+    count_q = db.table("products").select("id", count="exact").eq("merchant_id", mid)
+    data_q = db.table("products").select("*").eq("merchant_id", mid).order("created_at", desc=True).limit(limit).offset(offset)
+
+    if active is not None:
+        is_active = active.lower() == "true"
+        count_q = count_q.eq("active", is_active)
+        data_q = data_q.eq("active", is_active)
+    if category:
+        count_q = count_q.eq("category", category)
+        data_q = data_q.eq("category", category)
+    if q:
+        term = f"%{q}%"
+        count_q = count_q.or_(f"name.ilike.{term},sku.ilike.{term}")
+        data_q = data_q.or_(f"name.ilike.{term},sku.ilike.{term}")
+
+    count_res = count_q.execute()
+    total = count_res.count if count_res.count is not None else 0
+    data_res = data_q.execute()
+
+    if not data_res.data:
+        return {"data": [], "total": total, "offset": offset}
+
+    product_ids = [p["id"] for p in data_res.data]
     codes = db.table("payment_codes").select("product_id,reference,payments").in_("product_id", product_ids).execute()
     code_map = {c["product_id"]: c for c in (codes.data or [])}
-    for p in products.data:
+    for p in data_res.data:
         code = code_map.get(p["id"])
         p["qr_reference"] = code["reference"] if code else None
         p["payments"] = code["payments"] if code else 0
-    return products.data
+
+    return {"data": data_res.data, "total": total, "offset": offset}
 
 
 @router.post("/merchants/me/products", status_code=201)

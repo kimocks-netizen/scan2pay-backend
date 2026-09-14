@@ -10,7 +10,7 @@ set -euo pipefail
 PROFILE="predictiq"
 REGION="af-south-1"
 STACK="scan2pay-backend"
-ENV="${1:-dev}"
+ENV="${1:-prod}"
 EXPECTED_ACCOUNT="542727784619"
 
 # ── Colours ───────────────────────────────────────────────────────────────────
@@ -62,6 +62,7 @@ ssm_put WINSMS_API_KEY            "${WINSMS_API_KEY:-}"
 ssm_put PAYSTACK_SECRET_KEY       "${PAYSTACK_SECRET_KEY:-}"
 ssm_put PAYSTACK_PUBLIC_KEY       "${PAYSTACK_PUBLIC_KEY:-}"
 ssm_put PAYSTACK_WEBHOOK_SECRET   "${PAYSTACK_WEBHOOK_SECRET:-}"
+ssm_put MASTER_OTP                "${MASTER_OTP:-}"
 
 # ── SAM build ─────────────────────────────────────────────────────────────────
 info "Building..."

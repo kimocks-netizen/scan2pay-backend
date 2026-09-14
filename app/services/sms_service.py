@@ -31,5 +31,5 @@ async def send_sms(to: str, message: str) -> bool:
 
 
 async def send_otp(phone: str, code: str) -> bool:
-    message = f"Your Scan2Pay verification code is {code}. Valid for 10 minutes. Do not share this code."
+    message = f"Scan2Pay: Your access words are {code}. Expires in 10 minutes."
     return await send_sms(phone, message)

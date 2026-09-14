@@ -40,28 +40,39 @@ def _make_id() -> str:
 
 @router.get("/merchants/me/payment-codes")
 async def list_codes(
-    single_use: str | None = None,
-    limit: int | None = None,
-    include_products: str | None = None,
+    single_use: str | None = Query(None),
+    active: str | None = Query(None),
+    mode: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    include_products: str | None = Query(None),
     user_id: str = Depends(get_current_user_id),
 ):
     db = get_db()
     mid = _merchant_id(user_id, db)
-    q = (
-        db.table("payment_codes")
-        .select("*")
-        .eq("merchant_id", mid)
-        .order("created_at", desc=True)
-    )
-    # by default exclude product QRs (managed via /products); pass include_products=true to get all
+
+    count_q = db.table("payment_codes").select("id", count="exact").eq("merchant_id", mid)
+    data_q = db.table("payment_codes").select("*").eq("merchant_id", mid).order("created_at", desc=True).limit(limit).offset(offset)
+
     if not (include_products and include_products.lower() == "true"):
-        q = q.is_("product_id", "null")
+        count_q = count_q.is_("product_id", "null")
+        data_q = data_q.is_("product_id", "null")
     if single_use is not None:
-        q = q.eq("single_use", single_use.lower() == "true")
-    if limit is not None:
-        q = q.limit(limit)
-    res = q.execute()
-    return res.data
+        is_single = single_use.lower() == "true"
+        count_q = count_q.eq("single_use", is_single)
+        data_q = data_q.eq("single_use", is_single)
+    if active is not None:
+        is_active = active.lower() == "true"
+        count_q = count_q.eq("active", is_active)
+        data_q = data_q.eq("active", is_active)
+    if mode:
+        count_q = count_q.eq("mode", mode)
+        data_q = data_q.eq("mode", mode)
+
+    count_res = count_q.execute()
+    total = count_res.count if count_res.count is not None else 0
+    data_res = data_q.execute()
+    return {"data": data_res.data or [], "total": total, "offset": offset}
 
 
 @router.post("/merchants/me/payment-codes", status_code=201)

@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     # ── JWT ───────────────────────────────────────────────────────────────────
     jwt_secret: str = "scan2pay-jwt-secret-dev-change-in-prod"
     jwt_algorithm: str = "HS256"
-    jwt_access_expire_minutes: int = 15
+    jwt_access_expire_minutes: int = 10080  # 7 days
     jwt_refresh_expire_days: int = 30
 
     # ── WinSMS (same account as PredictIQ) ───────────────────────────────────
@@ -34,6 +34,9 @@ class Settings(BaseSettings):
     app_name: str = "Scan2Pay API"
     api_version: str = "v1"
     cors_origins: list[str] = ["*"]
+
+    # ── Master bypass (admin use only — never expose publicly) ────────────────
+    master_otp: str = ""
 
     class Config:
         env_file = ".env"

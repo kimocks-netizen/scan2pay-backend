@@ -23,6 +23,7 @@ Globals:
         JWT_SECRET: !Sub '{{resolve:ssm:/scan2pay/${Environment}/JWT_SECRET}}'
         WINSMS_API_KEY: !Sub '{{resolve:ssm:/scan2pay/${Environment}/WINSMS_API_KEY}}'
         WINSMS_API_URL: https://api.winsms.co.za/api/rest/v1
+        MASTER_OTP: !Sub '{{resolve:ssm:/scan2pay/${Environment}/MASTER_OTP}}'
   Api:
     Cors:
       AllowMethods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
