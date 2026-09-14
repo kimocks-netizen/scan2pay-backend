@@ -409,8 +409,25 @@ async def google_auth(body: GoogleAuthBody, request: Request):
         except ValueError:
             raise HTTPException(status_code=401, detail={"code": "invalid_google_token", "message": "Invalid Google token."})
     elif body.access_token and body.sub:
-        # Web flow: frontend already fetched userinfo, we trust sub+email+name
-        google_sub = body.sub
+        # Web flow: verify access_token by calling Google tokeninfo
+        import httpx as _httpx
+        try:
+            resp = _httpx.get(
+                "https://www.googleapis.com/oauth2/v3/tokeninfo",
+                params={"access_token": body.access_token},
+                timeout=10,
+            )
+            if resp.status_code != 200:
+                raise HTTPException(status_code=401, detail={"code": "invalid_google_token", "message": "Invalid Google token."})
+            token_info = resp.json()
+            # Ensure token was issued for our app
+            if token_info.get("azp") != settings.google_client_id and token_info.get("aud") != settings.google_client_id:
+                raise HTTPException(status_code=401, detail={"code": "invalid_google_token", "message": "Token audience mismatch."})
+            google_sub = token_info.get("sub") or body.sub
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=401, detail={"code": "invalid_google_token", "message": "Could not verify Google token."})
         email = (body.email or "").strip().lower()
         full_name = body.name or email.split("@")[0]
     else:
