@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     api_version: str = "v1"
     cors_origins: list[str] = ["*"]
 
+    # ── Google OAuth ──────────────────────────────────────────────────────────
+    google_client_id: str = ""
+    google_client_secret: str = ""
+
     # ── Master bypass (admin use only — never expose publicly) ────────────────
     master_otp: str = ""
 

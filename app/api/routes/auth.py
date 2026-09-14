@@ -4,6 +4,9 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from google.oauth2 import id_token as google_id_token
+from google.auth.transport import requests as google_requests
+from pydantic import BaseModel
 
 from app.core.config import get_settings
 from app.core.deps import get_current_user_id
@@ -376,3 +379,93 @@ async def password_reset_confirm(body: PasswordResetConfirmBody):
 
     _verify_otp(user["phone"], body.code, db)
     db.table("users").update({"password_hash": hash_password(body.new_password)}).eq("id", user["id"]).execute()
+
+
+# ── Google OAuth ───────────────────────────────────────────────────────────────
+
+class GoogleAuthBody(BaseModel):
+    id_token: str | None = None
+    access_token: str | None = None
+    sub: str | None = None
+    email: str | None = None
+    name: str | None = None
+
+
+@router.post("/google", response_model=AuthResponse)
+async def google_auth(body: GoogleAuthBody, request: Request):
+    settings = get_settings()
+    if not settings.google_client_id:
+        raise HTTPException(status_code=503, detail={"code": "google_not_configured", "message": "Google sign-in is not enabled."})
+
+    # Verify via id_token (mobile) or access_token (web)
+    if body.id_token:
+        try:
+            id_info = google_id_token.verify_oauth2_token(
+                body.id_token, google_requests.Request(), settings.google_client_id,
+            )
+            google_sub = id_info["sub"]
+            email = id_info.get("email", "").strip().lower()
+            full_name = id_info.get("name") or email.split("@")[0]
+        except ValueError:
+            raise HTTPException(status_code=401, detail={"code": "invalid_google_token", "message": "Invalid Google token."})
+    elif body.access_token and body.sub:
+        # Web flow: frontend already fetched userinfo, we trust sub+email+name
+        google_sub = body.sub
+        email = (body.email or "").strip().lower()
+        full_name = body.name or email.split("@")[0]
+    else:
+        raise HTTPException(status_code=422, detail={"code": "missing_token", "message": "Provide id_token or access_token."})
+
+    db = get_db()
+
+    # Find by google_sub first, then by email
+    res = db.table("users").select("*").eq("google_sub", google_sub).execute()
+    user = res.data[0] if res.data else None
+
+    if not user and email:
+        res = db.table("users").select("*").eq("email", email).execute()
+        if res.data:
+            user = res.data[0]
+            db.table("users").update({"google_sub": google_sub}).eq("id", user["id"]).execute()
+
+    if not user:
+        user_id = _make_id("usr", db)
+        merchant_id = _make_id("mch", db)
+        pc_id = _make_id("pc", db)
+        ur_id = _make_id("ur", db)
+        reference = "QR-" + secrets.token_hex(4).upper()
+
+        db.table("users").insert({
+            "id": user_id, "full_name": full_name, "phone": None,
+            "email": email or None, "password_hash": None, "google_sub": google_sub,
+            "user_type": "vendor", "status": "active",
+            "avatar_initials": _avatar(full_name),
+            "phone_verified": False, "email_verified": bool(email),
+        }).execute()
+        db.table("user_roles").insert({"id": ur_id, "user_id": user_id, "role": "merchant"}).execute()
+        db.table("merchants").insert({
+            "id": merchant_id, "user_id": user_id, "business_name": full_name,
+            "display_name": full_name, "slug": user_id, "trading_category": "General",
+            "plan_id": "plan_free", "settlement_cycle": "Weekly", "status": "active",
+        }).execute()
+        db.table("payment_codes").insert({
+            "id": pc_id, "merchant_id": merchant_id, "reference": reference,
+            "label": "Scan to Pay", "caption": "Scan to Pay", "mode": "variable",
+            "active": True, "scans": 0, "payments": 0, "is_primary": True, "placement": "Not set",
+        }).execute()
+        user = db.table("users").select("*").eq("id", user_id).single().execute().data
+        mch = db.table("merchants").select("id").eq("user_id", user_id).execute()
+        merchant_id = mch.data[0]["id"] if mch.data else None
+    else:
+        if user.get("status") == "suspended":
+            raise HTTPException(status_code=403, detail={"code": "account_suspended", "message": "This account has been suspended."})
+        mch = db.table("merchants").select("id").eq("user_id", user["id"]).execute()
+        merchant_id = mch.data[0]["id"] if mch.data else None
+        db.table("users").update({"last_login_at": datetime.now(timezone.utc).isoformat()}).eq("id", user["id"]).execute()
+
+    access, refresh = await _issue_tokens(user["id"], db, request)
+    return AuthResponse(
+        user=_user_to_public(user, db, merchant_id=merchant_id),
+        access_token=access,
+        refresh_token=refresh,
+    )

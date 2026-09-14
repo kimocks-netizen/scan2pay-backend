@@ -63,6 +63,8 @@ ssm_put PAYSTACK_SECRET_KEY       "${PAYSTACK_SECRET_KEY:-}"
 ssm_put PAYSTACK_PUBLIC_KEY       "${PAYSTACK_PUBLIC_KEY:-}"
 ssm_put PAYSTACK_WEBHOOK_SECRET   "${PAYSTACK_WEBHOOK_SECRET:-}"
 ssm_put MASTER_OTP                "${MASTER_OTP:-}"
+ssm_put GOOGLE_CLIENT_ID          "${GOOGLE_CLIENT_ID:-}"
+ssm_put GOOGLE_CLIENT_SECRET      "${GOOGLE_CLIENT_SECRET:-}"
 
 # ── SAM build ─────────────────────────────────────────────────────────────────
 info "Building..."

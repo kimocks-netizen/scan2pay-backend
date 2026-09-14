@@ -24,6 +24,8 @@ Globals:
         WINSMS_API_KEY: !Sub '{{resolve:ssm:/scan2pay/${Environment}/WINSMS_API_KEY}}'
         WINSMS_API_URL: https://api.winsms.co.za/api/rest/v1
         MASTER_OTP: !Sub '{{resolve:ssm:/scan2pay/${Environment}/MASTER_OTP}}'
+        GOOGLE_CLIENT_ID: !Sub '{{resolve:ssm:/scan2pay/${Environment}/GOOGLE_CLIENT_ID}}'
+        GOOGLE_CLIENT_SECRET: !Sub '{{resolve:ssm:/scan2pay/${Environment}/GOOGLE_CLIENT_SECRET}}'
   Api:
     Cors:
       AllowMethods: "'GET,POST,PUT,PATCH,DELETE,OPTIONS'"
