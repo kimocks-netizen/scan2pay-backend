@@ -4,8 +4,6 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from google.oauth2 import id_token as google_id_token
-from google.auth.transport import requests as google_requests
 from pydantic import BaseModel
 
 from app.core.config import get_settings
@@ -397,9 +395,13 @@ async def google_auth(body: GoogleAuthBody, request: Request):
     if not settings.google_client_id:
         raise HTTPException(status_code=503, detail={"code": "google_not_configured", "message": "Google sign-in is not enabled."})
 
+    import requests as _requests
+
     # Verify via id_token (mobile) or access_token (web)
     if body.id_token:
         try:
+            from google.oauth2 import id_token as google_id_token
+            from google.auth.transport import requests as google_requests
             id_info = google_id_token.verify_oauth2_token(
                 body.id_token, google_requests.Request(), settings.google_client_id,
             )
@@ -408,11 +410,10 @@ async def google_auth(body: GoogleAuthBody, request: Request):
             full_name = id_info.get("name") or email.split("@")[0]
         except ValueError:
             raise HTTPException(status_code=401, detail={"code": "invalid_google_token", "message": "Invalid Google token."})
-    elif body.access_token and body.sub:
-        # Web flow: verify access_token by calling Google tokeninfo
-        import httpx as _httpx
+    elif body.access_token:
+        # Web flow: verify access_token via Google tokeninfo endpoint
         try:
-            resp = _httpx.get(
+            resp = _requests.get(
                 "https://www.googleapis.com/oauth2/v3/tokeninfo",
                 params={"access_token": body.access_token},
                 timeout=10,
@@ -420,10 +421,9 @@ async def google_auth(body: GoogleAuthBody, request: Request):
             if resp.status_code != 200:
                 raise HTTPException(status_code=401, detail={"code": "invalid_google_token", "message": "Invalid Google token."})
             token_info = resp.json()
-            # Ensure token was issued for our app
             if token_info.get("azp") != settings.google_client_id and token_info.get("aud") != settings.google_client_id:
                 raise HTTPException(status_code=401, detail={"code": "invalid_google_token", "message": "Token audience mismatch."})
-            google_sub = token_info.get("sub") or body.sub
+            google_sub = token_info.get("sub") or body.sub or ""
         except HTTPException:
             raise
         except Exception:
