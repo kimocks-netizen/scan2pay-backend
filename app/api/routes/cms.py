@@ -4,11 +4,22 @@ from pydantic import BaseModel
 from app.core.config import get_settings
 from app.core.deps import require_staff
 from app.db.connection import get_db
-from app.services.s3_service import presign_put, delete_object, make_cms_id
+from app.services.s3_service import presign_put, presign_get, delete_object, make_cms_id
 
 router = APIRouter()
 
 VALID_SLOTS = ("hero", "feature_1", "feature_2", "banner", "feature_3", "feature_4", "feature_5")
+CMS_URL_TTL = 60 * 60 * 24 * 7  # 7 days
+
+
+def _client_presign(s3_key: str) -> str:
+    """Presigned GET URL valid for 7 days — suitable for CMS images cached by CDN/browser."""
+    from app.services.s3_service import _client, _bucket
+    return _client().generate_presigned_url(
+        "get_object",
+        Params={"Bucket": _bucket(), "Key": s3_key},
+        ExpiresIn=CMS_URL_TTL,
+    )
 
 
 class CmsUploadUrlRequest(BaseModel):
@@ -41,13 +52,12 @@ class CmsVisibilityRequest(BaseModel):
 
 @router.get("/cms/homepage")
 async def get_homepage_assets():
-    settings = get_settings()
     db = get_db()
     rows = db.table("cms_assets").select("slot,s3_key,filename,alt_text,focal_x,focal_y,uploaded_at") \
         .eq("active", True).eq("visible", True).execute()
     result = {}
     for row in (rows.data or []):
-        url = f"https://s3.af-south-1.amazonaws.com/{settings.assets_bucket}/{row['s3_key']}"
+        url = _client_presign(row["s3_key"])
         result[row["slot"]] = {
             "url": url,
             "filename": row["filename"],
@@ -140,11 +150,9 @@ async def update_focal_point(
 
 @router.get("/admin/cms")
 async def list_cms_assets(staff_id: str = Depends(require_staff)):
-    settings = get_settings()
     db = get_db()
     rows = db.table("cms_assets").select("id,slot,s3_key,filename,alt_text,focal_x,focal_y,visible,active,uploaded_by,uploaded_at").execute()
     result = []
     for row in (rows.data or []):
-        url = f"https://s3.af-south-1.amazonaws.com/{settings.assets_bucket}/{row['s3_key']}"
-        result.append({**row, "url": url})
+        result.append({**row, "url": _client_presign(row["s3_key"])})
     return result
