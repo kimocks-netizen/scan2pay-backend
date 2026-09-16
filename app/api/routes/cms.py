@@ -8,7 +8,7 @@ from app.services.s3_service import presign_put, delete_object, make_cms_id
 
 router = APIRouter()
 
-VALID_SLOTS = ("hero", "feature_1", "feature_2", "banner")
+VALID_SLOTS = ("hero", "feature_1", "feature_2", "banner", "feature_3", "feature_4", "feature_5")
 
 
 class CmsUploadUrlRequest(BaseModel):
