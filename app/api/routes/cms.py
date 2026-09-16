@@ -24,6 +24,13 @@ class CmsConfirmRequest(BaseModel):
     s3_key: str
     filename: str
     alt_text: str = ""
+    focal_x: float = 50
+    focal_y: float = 50
+
+
+class CmsFocalRequest(BaseModel):
+    focal_x: float
+    focal_y: float
 
 
 # ── Public: get current home page assets ─────────────────────────────────────
@@ -35,16 +42,17 @@ async def get_homepage_assets():
     assets = {row["slot"]: row for row in (res.data or [])}
 
     # Generate fresh presigned GET URLs for each active asset
-    full_res = db.table("cms_assets").select("slot,s3_key,filename,alt_text,uploaded_at").eq("active", True).execute()
+    full_res = db.table("cms_assets").select("slot,s3_key,filename,alt_text,focal_x,focal_y,uploaded_at").eq("active", True).execute()
     result = {}
     for row in (full_res.data or []):
         s3_key = row["s3_key"]
-        # cms/ objects are publicly readable — use permanent URL, no expiry
         url = f"https://s3.af-south-1.amazonaws.com/{settings.assets_bucket}/{s3_key}"
         result[row["slot"]] = {
             "url": url,
             "filename": row["filename"],
             "alt_text": row["alt_text"],
+            "focal_x": row.get("focal_x", 50),
+            "focal_y": row.get("focal_y", 50),
             "uploaded_at": row["uploaded_at"],
         }
     return result
@@ -91,11 +99,28 @@ async def confirm_cms_upload(
         "s3_key": body.s3_key,
         "filename": body.filename,
         "alt_text": body.alt_text,
+        "focal_x": body.focal_x,
+        "focal_y": body.focal_y,
         "active": True,
         "uploaded_by": staff_id,
     }).execute()
 
     return res.data[0]
+
+
+# ── Staff: update focal point only ───────────────────────────────────────────
+
+@router.patch("/admin/cms/{slot}/focal")
+async def update_focal_point(
+    slot: str,
+    body: CmsFocalRequest,
+    staff_id: str = Depends(require_staff),
+):
+    if slot not in VALID_SLOTS:
+        raise HTTPException(status_code=422, detail={"code": "invalid_slot", "message": "Invalid slot"})
+    db = get_db()
+    db.table("cms_assets").update({"focal_x": body.focal_x, "focal_y": body.focal_y}).eq("slot", slot).eq("active", True).execute()
+    return {"ok": True}
 
 
 # ── Staff: list all CMS assets ────────────────────────────────────────────────
