@@ -227,6 +227,72 @@ async def get_my_balance(user_id: str = Depends(get_current_user_id)):
     }
 
 
+# ── Account deletion (self-service, archive-only) ─────────────────────────────
+#
+# We never hard-delete on request. Eligible only when there's nothing left
+# outstanding in either direction; otherwise the merchant is told exactly
+# why not. Reactivation happens automatically if they ever register again
+# with the same phone/email (see auth.py) — see migration 018 for the
+# archived-then-never-returned purge that runs after 90 days.
+
+def _archive_eligibility(merchant_id: str, db) -> list[dict]:
+    """
+    Returns structured blockers, not pre-formatted strings — the frontend
+    renders amounts bold/colour-coded by `type`, which it can only do
+    reliably from structured facts, not by parsing sentences.
+    Empty list = eligible.
+    """
+    reasons = []
+
+    pending = db.table("transactions").select("id", count="exact") \
+        .eq("merchant_id", merchant_id).eq("status", "pending").execute()
+    if (pending.count or 0) > 0:
+        reasons.append({"type": "pending_transactions", "count": pending.count})
+
+    inflight_res = db.table("withdrawals").select("amount_cents") \
+        .eq("merchant_id", merchant_id).in_("status", ["pending", "approved"]).execute()
+    in_flight = sum(r["amount_cents"] for r in (inflight_res.data or []))
+    if in_flight > 0:
+        reasons.append({"type": "withdrawal_in_progress", "amount_cents": in_flight})
+
+    earned_res = db.table("transactions").select("net_cents") \
+        .eq("merchant_id", merchant_id).eq("status", "success").execute()
+    earned = sum(r["net_cents"] for r in (earned_res.data or []))
+    paid_res = db.table("withdrawals").select("amount_cents") \
+        .eq("merchant_id", merchant_id).eq("status", "paid").execute()
+    paid = sum(r["amount_cents"] for r in (paid_res.data or []))
+    outstanding = earned - paid - in_flight
+    if outstanding > 0:
+        reasons.append({"type": "balance_owed", "amount_cents": outstanding})
+
+    return reasons
+
+
+@router.delete("/me")
+async def delete_my_account(user_id: str = Depends(get_current_user_id)):
+    db = get_db()
+    merchant = _get_merchant(user_id, db)
+
+    reasons = _archive_eligibility(merchant["id"], db)
+    if reasons:
+        raise HTTPException(status_code=409, detail={
+            "code": "not_eligible",
+            "message": "Your account can't be closed yet.",
+            "reasons": reasons,
+        })
+
+    now = datetime.now(timezone.utc).isoformat()
+    db.table("payment_codes").update({"active": False}).eq("merchant_id", merchant["id"]).execute()
+    db.table("merchants").update({
+        "status": "closed", "archived_at": now, "archived_by": user_id,
+    }).eq("id", merchant["id"]).execute()
+    db.table("users").update({
+        "status": "archived", "archived_at": now, "archived_by": user_id,
+    }).eq("id", user_id).execute()
+
+    return {"status": "closed", "archived_at": now}
+
+
 # ── /{merchant_id} wildcard — must be last ────────────────────────────────────
 
 @router.get("/{merchant_id}")

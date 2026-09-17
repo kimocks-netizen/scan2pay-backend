@@ -166,19 +166,67 @@ def _resolve_user_by_identifier(identifier: str, db) -> dict:
     return res.data[0] if res.data else None
 
 
+async def _reactivate(row: dict, body: RegisterRequest, db, request: Request) -> AuthResponse:
+    """
+    Someone registering again with the phone/email of an archived account.
+    Their phone verification IS the proof of ownership, so this reactivates
+    immediately rather than waiting on admin approval — flagged via
+    reactivated_at/reactivation_count for admin visibility either way.
+    """
+    user_id = row["id"]
+    now = datetime.now(timezone.utc).isoformat()
+
+    db.table("users").update({
+        "full_name": body.full_name,
+        "email": body.email.strip().lower() if body.email else row.get("email"),
+        "password_hash": hash_password(body.password),
+        "status": "active",
+        "reactivated_at": now,
+        "reactivation_count": (row.get("reactivation_count") or 0) + 1,
+        "phone_verified": False,
+    }).eq("id", user_id).execute()
+
+    merchant_res = db.table("merchants").select("id").eq("user_id", user_id).execute()
+    if merchant_res.data:
+        merchant_id = merchant_res.data[0]["id"]
+        db.table("merchants").update({
+            "business_name": body.business_name or body.full_name,
+            "display_name": body.business_name or body.full_name,
+            "status": "active",
+        }).eq("id", merchant_id).execute()
+        db.table("payment_codes").update({"active": True}).eq("merchant_id", merchant_id).eq("is_primary", True).execute()
+    else:
+        merchant_id = None
+
+    await _send_otp_to(row["phone"], db)
+    access, refresh = await _issue_tokens(user_id, db, request)
+    user_row = db.table("users").select("*").eq("id", user_id).execute().data[0]
+    return AuthResponse(
+        user=_user_to_public(user_row, db, merchant_id=merchant_id),
+        access_token=access,
+        refresh_token=refresh,
+    )
+
+
 # ── register ──────────────────────────────────────────────────────────────────
 
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 async def register(body: RegisterRequest, request: Request):
     db = get_db()
 
-    existing = db.table("users").select("id").eq("phone", body.phone).execute()
+    existing = db.table("users").select("*").eq("phone", body.phone).execute()
     if existing.data:
+        row = existing.data[0]
+        if row["status"] == "archived":
+            return await _reactivate(row, body, db, request)
         raise HTTPException(status_code=409, detail={"code": "phone_taken", "message": "That mobile number is already registered."})
 
     if body.email:
-        existing_email = db.table("users").select("id").eq("email", body.email.lower()).execute()
+        existing_email = db.table("users").select("*").eq("email", body.email.lower()).execute()
         if existing_email.data:
+            row = existing_email.data[0]
+            if row["status"] == "archived":
+                return await _reactivate(row, body, db, request)
             raise HTTPException(status_code=409, detail={"code": "email_taken", "message": "That email address is already registered."})
 
     user_id = _make_id("usr", db)

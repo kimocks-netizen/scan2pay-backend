@@ -115,6 +115,27 @@ Resources:
             Schedule: cron(0 18 * * ? *)
             Description: Build settlements daily at 18:00 UTC (20:00 SAST)
 
+  # ── Cron: purge (anonymise) archived accounts after 90 days ────────────────
+  PurgeArchivedAccountsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.cron.purge_archived_accounts.handler
+      CodeUri: .
+      Description: POPIA — anonymise personal fields + delete KYC docs on accounts archived 90+ days with no reactivation
+      Timeout: 60
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref AssetsBucket
+      Environment:
+        Variables:
+          ASSETS_BUCKET: !Ref AssetsBucket
+      Events:
+        Schedule:
+          Type: Schedule
+          Properties:
+            Schedule: cron(30 3 * * ? *)
+            Description: Run daily at 03:30 UTC (05:30 SAST)
+
   # ── S3 bucket for merchant logos, QR images, KYC docs, CMS assets ──────────
   AssetsBucket:
     Type: AWS::S3::Bucket

@@ -113,6 +113,35 @@ Body: any of `displayName`, `city`, `province`, `tradingCategory`. → updated m
 Creates a Paystack transfer recipient, stores `recipient_code`, returns the
 merchant with a masked account. Never return the full account number.
 
+### `DELETE /merchants/me` ✅ Live — self-service account deletion (archive, not hard-delete)
+
+Eligibility checked server-side before archiving — 409 with a `reasons` array if blocked:
+
+```json
+{
+  "detail": {
+    "code": "not_eligible",
+    "message": "Your account can't be closed yet.",
+    "reasons": ["1 pending transaction(s) still in progress.", "We still owe you 150.00 — withdraw it first."]
+  }
+}
+```
+
+If eligible: deactivates the merchant's payment codes, sets `merchants.status = 'closed'` and
+`users.status = 'archived'` (`archived_at`/`archived_by` recorded on both). "The Danger zone" copy
+on Settings (web + mobile) explains the flow to the merchant:
+
+> Closing your account deactivates your QR codes and hides your profile. If you register again with
+> the same phone or email, we'll reactivate it automatically. If you never do, it's permanently
+> deleted after 90 days.
+
+Reactivation is automatic — `POST /auth/register` with the same phone/email while `archived`
+reactivates instead of rejecting as "already registered" (phone OTP re-verification is the proof of
+ownership). Never reactivated within 90 days → the `PurgeArchivedAccountsFunction` cron anonymises
+personal fields (name, phone, email, password, payout bank details) — the row and its transaction
+history are kept for accounting/tax retention, only personal data is scrubbed. See migration
+`018_account_archival.sql` and `app/cron/purge_archived_accounts.py`.
+
 ---
 
 ## 3. Products ✅ Live
@@ -247,12 +276,46 @@ pricing versioning rules and the audit-log contract live in `docs/admin.md`.
 | GET | `/admin/stats` | platform totals |
 | GET | `/admin/users` · POST `/admin/users/{id}/status` | user management |
 | GET | `/admin/merchants` · POST `/admin/merchants/{id}/status` · `/plan` | business management |
+| POST | `/admin/merchants/{id}/archive` ✅ Live | admin-forced archive — bypasses the eligibility checks `DELETE /merchants/me` enforces (e.g. closing a fraudulent account). Body: `{ "reason": "..." }` |
+| POST | `/admin/merchants/{id}/reactivate` ✅ Live | manual reactivation without waiting for the merchant to re-register. Sets `merchants.status = 'active'`, `users.status = 'active'`, bumps `reactivation_count` |
+| GET | `/admin/merchants?status=closed` · `/admin/users?status=archived` ✅ Live | already-supported status filter now also surfaces archived accounts — no new endpoint needed |
+| GET | `/admin/growth` ✅ Live | People page growth analytics — see below |
 | GET | `/admin/transactions` | every payment with its pricing snapshot |
 | GET | `/admin/payment-codes` | code management |
 | GET | `/admin/settlements` | pending vs settled per business |
 | GET | `/admin/withdrawals?status=` · POST `/admin/withdrawals/{id}/status` | payout queue |
 | GET | `/admin/pricing/versions` · POST `/admin/pricing/versions` | publish a pricing version |
 | GET | `/admin/audit` | audit log |
+
+### `GET /admin/growth` ✅ Live
+
+Powers the "Compare by" (Week / Fortnight / Month) cards and the three trend charts on
+`/admin/people`. All bucketing happens server-side in `admin.py` — the frontend never fetches raw
+merchant/user rows for this.
+
+```json
+{
+  "week":      { "current": { "start": "2026-09-13", "end": "2026-09-17", "merchants": 5, "users": 12 },
+                 "previous": { "start": "2026-09-06", "end": "2026-09-10", "merchants": 3, "users": 9 },
+                 "elapsed_days": 5 },
+  "fortnight": { "current": {...}, "previous": {...}, "elapsed_days": 12 },
+  "month":     { "current": { "label": "Aug 2026", "merchants": 40, "users": 90, ... },
+                 "previous": { "label": "Jul 2026", "merchants": 35, "users": 80, ... } },
+  "daily_30":   [ { "label": "20 Aug", "merchants": 2, "users": 5 }, ... ],
+  "weekly_12":  [ { "label": "23 Aug", "merchants": 9, "users": 20 }, ... ],
+  "monthly_12": [ { "label": "Aug 26", "merchants": 40, "users": 90, "cum_merchants": 812, "cum_users": 1904 }, ... ],
+  "totals":     { "merchants": 812, "users": 1904 }
+}
+```
+
+Two deliberate framing choices, not obvious from the shape alone:
+
+- **Week/fortnight are elapsed-day-matched.** `previous` is truncated to the same number of days
+  as `current` (`elapsed_days`) — a partial current week is never compared against a full prior
+  week, which would always look like a decline regardless of actual performance.
+- **Month always compares the last two *complete* calendar months** (e.g. August vs July), never
+  the current partial month against a complete one — that comparison is simply not offered until
+  the month ends. The current partial month still appears as the newest bar in `monthly_12`.
 
 ---
 

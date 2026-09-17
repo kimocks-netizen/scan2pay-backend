@@ -146,6 +146,62 @@ async def update_merchant_admin(
     return res.data[0]
 
 
+class MerchantArchiveRequest(BaseModel):
+    reason: str
+
+
+@router.post("/merchants/{merchant_id}/archive")
+async def archive_merchant_admin(
+    merchant_id: str,
+    body: MerchantArchiveRequest,
+    admin_id: str = Depends(require_admin),
+):
+    """
+    Admin-forced archive — bypasses the eligibility checks the merchant's own
+    DELETE /merchants/me is subject to (e.g. closing a fraudulent account).
+    Use with care: money owing in either direction is NOT re-checked here.
+    """
+    db = get_db()
+    m = db.table("merchants").select("id,user_id").eq("id", merchant_id).execute()
+    if not m.data:
+        raise HTTPException(status_code=404, detail={"code": "not_found", "message": "Merchant not found."})
+    user_id = m.data[0]["user_id"]
+
+    now = datetime.now(timezone.utc).isoformat()
+    db.table("payment_codes").update({"active": False}).eq("merchant_id", merchant_id).execute()
+    db.table("merchants").update({
+        "status": "closed", "archived_at": now, "archived_by": admin_id, "archive_reason": body.reason,
+    }).eq("id", merchant_id).execute()
+    db.table("users").update({
+        "status": "archived", "archived_at": now, "archived_by": admin_id, "archive_reason": body.reason,
+    }).eq("id", user_id).execute()
+
+    return {"status": "closed", "archived_at": now}
+
+
+@router.post("/merchants/{merchant_id}/reactivate")
+async def reactivate_merchant_admin(merchant_id: str, admin_id: str = Depends(require_admin)):
+    """Manual reactivation, without waiting for the merchant to re-register."""
+    db = get_db()
+    m = db.table("merchants").select("id,user_id,status").eq("id", merchant_id).execute()
+    if not m.data:
+        raise HTTPException(status_code=404, detail={"code": "not_found", "message": "Merchant not found."})
+    if m.data[0]["status"] != "closed":
+        raise HTTPException(status_code=422, detail={"code": "not_archived", "message": "This account isn't archived."})
+    user_id = m.data[0]["user_id"]
+
+    now = datetime.now(timezone.utc).isoformat()
+    db.table("merchants").update({"status": "active"}).eq("id", merchant_id).execute()
+    user_res = db.table("users").select("reactivation_count").eq("id", user_id).execute()
+    count = (user_res.data[0]["reactivation_count"] if user_res.data else 0) or 0
+    db.table("users").update({
+        "status": "active", "reactivated_at": now, "reactivation_count": count + 1,
+    }).eq("id", user_id).execute()
+    db.table("payment_codes").update({"active": True}).eq("merchant_id", merchant_id).eq("is_primary", True).execute()
+
+    return {"status": "active", "reactivated_at": now}
+
+
 # ── Users ─────────────────────────────────────────────────────────────────────
 
 @router.get("/users")
