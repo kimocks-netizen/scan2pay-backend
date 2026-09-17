@@ -115,17 +115,27 @@ merchant with a masked account. Never return the full account number.
 
 ### `DELETE /merchants/me` ✅ Live — self-service account deletion (archive, not hard-delete)
 
-Eligibility checked server-side before archiving — 409 with a `reasons` array if blocked:
+Eligibility checked server-side before archiving — 409 with a `reasons` array if blocked. Each
+reason is structured, not a pre-formatted sentence — the frontend renders (and colour-codes) the
+amount/count itself, which it can only do reliably from typed facts:
 
 ```json
 {
   "detail": {
     "code": "not_eligible",
     "message": "Your account can't be closed yet.",
-    "reasons": ["1 pending transaction(s) still in progress.", "We still owe you 150.00 — withdraw it first."]
+    "reasons": [
+      { "type": "pending_transactions", "count": 1 },
+      { "type": "withdrawal_in_progress", "amount_cents": 5000 },
+      { "type": "balance_owed", "amount_cents": 153453 }
+    ]
   }
 }
 ```
+
+`type` is one of `pending_transactions` (has `count`), `withdrawal_in_progress` (has
+`amount_cents`, an in-flight payout), or `balance_owed` (has `amount_cents`, settled money not
+yet withdrawn).
 
 If eligible: deactivates the merchant's payment codes, sets `merchants.status = 'closed'` and
 `users.status = 'archived'` (`archived_at`/`archived_by` recorded on both). "The Danger zone" copy
