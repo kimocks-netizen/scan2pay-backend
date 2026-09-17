@@ -121,7 +121,7 @@ async def list_all_merchants(
     staff_id: str = Depends(require_staff),
 ):
     db = get_db()
-    q = db.table("merchants").select("id,user_id,business_name,display_name,slug,status,plan_id,trading_category,city,province,created_at", count="exact").order("created_at", desc=True).limit(limit).offset(offset)
+    q = db.table("merchants").select("id,user_id,business_name,display_name,slug,status,plan_id,trading_category,city,province,created_at,archived_at,archive_reason", count="exact").order("created_at", desc=True).limit(limit).offset(offset)
     if status:
         q = q.eq("status", status)
     res = q.execute()
@@ -212,7 +212,7 @@ async def list_all_users(
     staff_id: str = Depends(require_staff),
 ):
     db = get_db()
-    q = db.table("users").select("id,full_name,phone,email,user_type,status,created_at", count="exact").order("created_at", desc=True).limit(limit).offset(offset)
+    q = db.table("users").select("id,full_name,phone,email,user_type,status,created_at,archived_at,reactivated_at", count="exact").order("created_at", desc=True).limit(limit).offset(offset)
     if status:
         q = q.eq("status", status)
     res = q.execute()
