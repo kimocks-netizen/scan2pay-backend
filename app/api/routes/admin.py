@@ -1,4 +1,5 @@
-from datetime import datetime, timezone
+import calendar
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -194,6 +195,130 @@ async def update_user_admin(
     if not res.data:
         raise HTTPException(status_code=404, detail={"code": "not_found", "message": "User not found."})
     return res.data[0]
+
+
+# ── Growth analytics ─────────────────────────────────────────────────────────
+#
+# Week/fortnight comparisons are elapsed-day-matched: the "previous" window is
+# truncated to the same number of days as the current (partial) one, so e.g.
+# on a Wednesday we compare "Sun–Wed this week" against "Sun–Wed last week"
+# rather than a partial week against a full one.
+#
+# Month comparison is different on purpose: it always uses the last two FULLY
+# COMPLETE calendar months (e.g. August vs July), never the current partial
+# month — comparing a partial month against a complete one is misleading, so
+# that comparison simply isn't offered until the month ends. The current
+# (partial) month still shows up as the latest bar in `monthly_12`.
+
+def _to_date(iso: str) -> date:
+    return datetime.fromisoformat(iso.replace("Z", "+00:00")).date()
+
+
+def _week_start(d: date) -> date:
+    """Most recent Sunday on/before `d` (Sunday-anchored calendar week)."""
+    days_since_sunday = (d.weekday() + 1) % 7
+    return d - timedelta(days=days_since_sunday)
+
+
+def _month_bounds(d: date) -> tuple[date, date]:
+    start = d.replace(day=1)
+    end = d.replace(day=calendar.monthrange(d.year, d.month)[1])
+    return start, end
+
+
+def _count_between(rows: list[dict], start: date, end: date) -> int:
+    return sum(1 for r in rows if start <= _to_date(r["created_at"]) <= end)
+
+
+def _period(rows_m: list[dict], rows_u: list[dict], start: date, end: date) -> dict:
+    return {
+        "start": start.isoformat(),
+        "end": end.isoformat(),
+        "merchants": _count_between(rows_m, start, end),
+        "users": _count_between(rows_u, start, end),
+    }
+
+
+@router.get("/growth")
+async def get_growth_stats(staff_id: str = Depends(require_staff)):
+    db = get_db()
+    m_rows = db.table("merchants").select("created_at").limit(5000).execute().data or []
+    u_rows = db.table("users").select("created_at").limit(5000).execute().data or []
+
+    today = datetime.now(timezone.utc).date()
+
+    # ── Week: Sunday-anchored, elapsed-day-matched ────────────────────────────
+    cur_week_start = _week_start(today)
+    elapsed_week = (today - cur_week_start).days + 1
+    prev_week_start = cur_week_start - timedelta(days=7)
+    prev_week_end = prev_week_start + timedelta(days=elapsed_week - 1)
+    week = {
+        "current": _period(m_rows, u_rows, cur_week_start, today),
+        "previous": _period(m_rows, u_rows, prev_week_start, prev_week_end),
+        "elapsed_days": elapsed_week,
+    }
+
+    # ── Fortnight: two Sunday-anchored weeks, elapsed-day-matched ─────────────
+    cur_fort_start = cur_week_start - timedelta(days=7)
+    elapsed_fort = (today - cur_fort_start).days + 1
+    prev_fort_start = cur_fort_start - timedelta(days=14)
+    prev_fort_end = prev_fort_start + timedelta(days=elapsed_fort - 1)
+    fortnight = {
+        "current": _period(m_rows, u_rows, cur_fort_start, today),
+        "previous": _period(m_rows, u_rows, prev_fort_start, prev_fort_end),
+        "elapsed_days": elapsed_fort,
+    }
+
+    # ── Month: always the last two COMPLETE calendar months ───────────────────
+    this_month_start, _ = _month_bounds(today)
+    last_complete_end = this_month_start - timedelta(days=1)
+    last_complete_start, _ = _month_bounds(last_complete_end)
+    prev_complete_end = last_complete_start - timedelta(days=1)
+    prev_complete_start, _ = _month_bounds(prev_complete_end)
+    month = {
+        "current": {**_period(m_rows, u_rows, last_complete_start, last_complete_end),
+                    "label": last_complete_start.strftime("%b %Y")},
+        "previous": {**_period(m_rows, u_rows, prev_complete_start, prev_complete_end),
+                     "label": prev_complete_start.strftime("%b %Y")},
+    }
+
+    # ── Trend series for charts ────────────────────────────────────────────────
+    daily_30 = []
+    for i in range(29, -1, -1):
+        d = today - timedelta(days=i)
+        daily_30.append({"label": d.strftime("%d %b"), **_period(m_rows, u_rows, d, d)})
+
+    weekly_12 = []
+    for i in range(11, -1, -1):
+        ws = cur_week_start - timedelta(days=7 * i)
+        we = ws + timedelta(days=6)
+        weekly_12.append({"label": ws.strftime("%d %b"), **_period(m_rows, u_rows, ws, we)})
+
+    monthly_12 = []
+    cursor = this_month_start
+    month_starts = []
+    for _ in range(12):
+        month_starts.append(cursor)
+        cursor = (cursor - timedelta(days=1)).replace(day=1)
+    for ms in reversed(month_starts):
+        me = _month_bounds(ms)[1]
+        monthly_12.append({
+            "label": ms.strftime("%b %y"),
+            "merchants": _count_between(m_rows, ms, me),
+            "users": _count_between(u_rows, ms, me),
+            "cum_merchants": sum(1 for r in m_rows if _to_date(r["created_at"]) <= me),
+            "cum_users": sum(1 for r in u_rows if _to_date(r["created_at"]) <= me),
+        })
+
+    return {
+        "week": week,
+        "fortnight": fortnight,
+        "month": month,
+        "daily_30": daily_30,
+        "weekly_12": weekly_12,
+        "monthly_12": monthly_12,
+        "totals": {"merchants": len(m_rows), "users": len(u_rows)},
+    }
 
 
 # ── Transactions (platform-wide) ──────────────────────────────────────────────
