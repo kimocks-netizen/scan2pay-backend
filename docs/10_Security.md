@@ -1,7 +1,7 @@
 # Scan2Pay — Security Reference
 
 > Living document. Updated as security posture changes.
-> Last updated: 18 September 2026
+> Last updated: 19 September 2026
 
 ---
 
@@ -19,12 +19,15 @@
 
 ### API
 - All secrets in AWS SSM Parameter Store — never in code or env files
+- **`.env` never committed** — confirmed gitignored in all three repos (`scan2pay-backend`, `scan2pay-web`, `scan2pay-app`); only `.env.example` (no real values) is tracked
 - Pydantic request validation on all endpoints — malformed input rejected before handler runs
 - **Input size limits** — `Field(min_length=..., max_length=...)` on all text fields (names/emails 100–254 chars, descriptions 500), amount ceilings on all money fields (`le=9_900_000` cents / R99,000)
 - **Rate limiting** — in-memory per-Lambda-instance limiter (`app/core/rate_limit.py`) on `register`, `login`, `otp_request`, `otp_verify`, `password-reset/request`, `password-reset/confirm`, `pay_init` (5/min for auth endpoints, 3/min for OTP/reset sends, 10/min for public pay init)
 - Supabase client uses parameterised queries — no raw SQL string interpolation
 - `require_admin` / `require_staff` dependency guards on all sensitive endpoints
 - Webhook HMAC-SHA512 signature verification on every Paystack webhook
+- **Admin action audit trail** — `admin_audit_log` table + `log_admin_action()` (`app/core/audit.py`) records every admin write (merchant/user status changes, archive/reactivate, KYC approve/reject, withdrawal approve/reject, pricing publish, manual settlement run), viewable on the web Admin → Audit log page (`GET /admin/audit-log`)
+- **Dependency scanning in CI** — `pip-audit` (backend) and `npm audit --audit-level=high` (web + app) run on every push/PR via GitHub Actions (`.github/workflows/dependency-scan.yml` in each repo). Caught and fixed real CVEs in `python-jose`, `requests`, `python-multipart`, `pyasn1` on first run — see the `starlette`/`ecdsa` rows in Known Risks for the two that are explicitly ignored (documented, not silent)
 
 ### Data
 - Full bank account numbers never stored — only masked (`**** 1407`)
@@ -41,9 +44,14 @@
 
 ### Infrastructure
 - S3 bucket: `BlockPublicAcls`, `IgnorePublicAcls` enabled; `kyc/` prefix fully private
+- **S3 CORS restricted** — `AllowedOrigins` limited to `scan2pay.site`, `vula-pay.site`, `vula-pay.co.za`, `vula-pay.xyz`, `localhost:3000` (was `['*']`)
 - S3 KYC lifecycle: GLACIER_IR after 90 days, deleted after 730 days
 - CloudWatch logs on all Lambda functions
 - API Gateway with IAM execution role — least privilege
+
+### Frontend (scan2pay-web)
+- **CSP headers** — `Content-Security-Policy` set via `next.config.ts` `headers()`, scoped to what the app actually loads (self + Google OAuth + Paystack checkout + the API Gateway origin); `frame-src` allows any `*.paystack.com`/`*.paystack.co` subdomain so Paystack checkout redirects don't need a CSP edit each time; `object-src 'none'`, `frame-ancestors 'self'`, `base-uri 'self'`; `'unsafe-eval'` only added in dev (Turbopack/React dev tooling needs it), never in production builds
+- `Cross-Origin-Opener-Policy: same-origin-allow-popups` (needed for the Google OAuth popup flow)
 
 ---
 
@@ -59,21 +67,15 @@
 
 | Risk | Detail | Fix |
 |---|---|---|
-| **No CSP headers** | No Content-Security-Policy on Next.js responses — XSS impact higher | Add CSP via `next.config.js` headers |
 | **Refresh token in localStorage** | Even if access token moves to cookie, refresh token in localStorage is still XSS-exposed | Store refresh token in `httpOnly` cookie too |
-| **Audit log gaps** | `webhook_events` logs Paystack events but no audit trail for admin actions (who approved withdrawal, who changed plan) | Extend audit log to cover admin write actions |
-| **S3 CORS `AllowedOrigins: ['*']`** | Overly permissive — any origin can PUT to the bucket with a valid presigned URL | Restrict to `scan2pay.site` and `localhost:3000` in prod |
-| **No CloudTrail** | No AWS CloudTrail — no record of who called which AWS API (S3, SSM, Lambda) | Enable CloudTrail in `af-south-1` |
 
 ### Low Priority / Future
 
 | Risk | Detail | Fix |
 |---|---|---|
-| **JWT secret rotation** | `JWT_SECRET` in SSM has never been rotated — all tokens would be invalidated on rotation | Document rotation procedure; rotate before go-live |
-| **No MFA for admin** | Admin login is phone OTP only — no second factor for high-privilege accounts | TOTP (Google Authenticator) as optional second factor for admin/support roles |
-| **Merchant data export** | `DELETE /merchants/me` (archive, POPIA-anonymise after 90 days) is done. No self-service data export endpoint yet. | `GET /merchants/me/export` |
-| **Dependency scanning** | No automated CVE scanning on Python or npm dependencies | Add `pip-audit` + `npm audit` to CI/CD |
-| **Secrets in `.env`** | Local `.env` files contain real Paystack test keys — should not be committed | Confirm `.env` is in `.gitignore`; rotate keys if ever committed |
+| **No MFA for admin** | Admin login is phone OTP only — no second factor for high-privilege accounts | TOTP (Google Authenticator) as optional second factor for admin/support roles — not now |
+| **`starlette` CVEs (transitive)** | Pinned at 0.38.6 via `fastapi==0.115.0`, which caps `starlette<0.39.0` — every fixed version (0.40.0+) is outside that range. `pip-audit` explicitly ignores these IDs (`PYSEC-2026-1943/1941/161/2281/2280/249/248`) in CI with a comment, not silently. | Requires a `fastapi` major-version upgrade — bigger, riskier change on a payments backend, needs its own review before doing it |
+| **`ecdsa` CVE (transitive, no fix)** | Pulled in by `python-jose`; `PYSEC-2026-1325` (timing side-channel in EC operations) has no patched version. Not exploitable here — our JWTs use `HS256` only (`app/core/security.py`), never an elliptic-curve algorithm. Ignored in CI with a comment. | None needed while `jwt_algorithm` stays `HS256`; revisit only if the app ever adopts an EC-based JWT algorithm |
 
 ---
 
@@ -117,19 +119,20 @@ What we do store:
 - [x] Add input size limits (Pydantic `Field` constraints) across all request schemas
 - [x] Add account lockout after 5 failed login attempts (5-minute lock)
 - [x] Password reset flow (`POST /auth/password-reset/request` + confirm)
-- [ ] Restrict S3 CORS `AllowedOrigins` to production domain
-- [ ] Confirm `.env` files are in `.gitignore` and never committed
+- [x] Confirm `.env` files are in `.gitignore` and never committed
 
 ### Sprint 2 (before go-live)
 - [ ] Move tokens from localStorage to `httpOnly` cookies
-- [ ] Enable CloudTrail in `af-south-1`
-- [ ] Add CSP headers in `next.config.js`
+- [x] Add CSP headers in `next.config.ts`
+- [x] Restrict S3 CORS `AllowedOrigins` to production domains
+- [x] Extend audit log to cover admin write actions (`admin_audit_log` table + `/admin/audit-log`)
 
 ### Sprint 3 (post-launch)
-- [ ] POPIA data export + deletion endpoints
-- [ ] Extend audit log to cover admin write actions
-- [ ] Dependency scanning in CI/CD (`pip-audit` + `npm audit`)
-- [ ] MFA (TOTP) for admin/support roles
+- [x] Dependency scanning in CI/CD (`pip-audit` + `npm audit`)
+- [ ] MFA (TOTP) for admin/support roles — not now
 
 ### Won't do (cost vs. benefit)
 - **WAF WebACL** — ~$5/month fixed cost not justified at current scale (~11k req/month). Rate limiting + Pydantic input validation cover the realistic risk at this traffic level. Revisit only if prod traffic exceeds ~500k req/month or we see actual abuse patterns in CloudWatch logs.
+- **CloudTrail** — adds ongoing per-event storage/ingestion cost for AWS API call logging we don't need at this scale. CloudWatch logs on every Lambda already cover application-level activity; CloudTrail would only add infra-level API call tracing. Deferred while cost control is the priority.
+- **Merchant self-service data export** (`GET /merchants/me/export`) — decided not to build this. The deletion/anonymisation side of POPIA data-subject rights is already covered by `DELETE /merchants/me`; a self-service export endpoint isn't being added on top of it.
+- **JWT secret rotation** — not doing a rotation procedure/schedule for `JWT_SECRET`. Accepted as-is.

@@ -4,6 +4,7 @@ from datetime import date, datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
+from app.core.audit import log_admin_action
 from app.core.config import get_settings
 from app.core.deps import require_admin, require_staff
 from app.db.connection import get_db
@@ -108,6 +109,7 @@ async def publish_pricing_version(
         "created_by": admin_id,
         "note": body.note,
     }).execute()
+    log_admin_action(admin_id, "pricing.publish", "plan", body.plan_id, {"version": next_version, "name": body.name})
     return res.data[0]
 
 
@@ -143,6 +145,7 @@ async def update_merchant_admin(
     res = db.table("merchants").update(updates).eq("id", merchant_id).execute()
     if not res.data:
         raise HTTPException(status_code=404, detail={"code": "not_found", "message": "Merchant not found."})
+    log_admin_action(admin_id, "merchant.update", "merchant", merchant_id, updates)
     return res.data[0]
 
 
@@ -176,6 +179,7 @@ async def archive_merchant_admin(
         "status": "archived", "archived_at": now, "archived_by": admin_id, "archive_reason": body.reason,
     }).eq("id", user_id).execute()
 
+    log_admin_action(admin_id, "merchant.archive", "merchant", merchant_id, {"reason": body.reason})
     return {"status": "closed", "archived_at": now}
 
 
@@ -199,6 +203,7 @@ async def reactivate_merchant_admin(merchant_id: str, admin_id: str = Depends(re
     }).eq("id", user_id).execute()
     db.table("payment_codes").update({"active": True}).eq("merchant_id", merchant_id).eq("is_primary", True).execute()
 
+    log_admin_action(admin_id, "merchant.reactivate", "merchant", merchant_id, None)
     return {"status": "active", "reactivated_at": now}
 
 
@@ -250,6 +255,7 @@ async def update_user_admin(
     res = db.table("users").update(updates).eq("id", user_id).execute()
     if not res.data:
         raise HTTPException(status_code=404, detail={"code": "not_found", "message": "User not found."})
+    log_admin_action(admin_id, "user.update", "user", user_id, updates)
     return res.data[0]
 
 
@@ -444,6 +450,34 @@ async def list_audit_log(
     return {"data": res.data or [], "total": res.count or 0}
 
 
+@router.get("/audit-log")
+async def list_admin_audit_log(
+    action: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    admin_id: str = Depends(require_admin),
+):
+    """Admin write-action trail — who did what, to which resource, when."""
+    db = get_db()
+    q = db.table("admin_audit_log") \
+        .select("id,admin_id,action,target_type,target_id,detail,created_at", count="exact") \
+        .order("created_at", desc=True) \
+        .limit(limit).offset(offset)
+    if action:
+        q = q.eq("action", action)
+    res = q.execute()
+    entries = res.data or []
+
+    if entries:
+        admin_ids = list({e["admin_id"] for e in entries})
+        admins = db.table("users").select("id,full_name").in_("id", admin_ids).execute()
+        name_map = {a["id"]: a["full_name"] for a in (admins.data or [])}
+        for e in entries:
+            e["admin_name"] = name_map.get(e["admin_id"], "Unknown")
+
+    return {"data": entries, "total": res.count or 0}
+
+
 # ── Settlements ───────────────────────────────────────────────────────────────
 
 @router.get("/settlements/pending")
@@ -503,6 +537,7 @@ async def run_settlement_now(
     """
     db = get_db()
     result = run_settlements(db, merchant_id=merchant_id)
+    log_admin_action(admin_id, "settlement.run", "merchant", merchant_id or "all", result if isinstance(result, dict) else None)
     return result
 
 
@@ -573,6 +608,7 @@ async def update_withdrawal_status(
             "decided_by": admin_id,
         }).eq("id", withdrawal_id).execute()
         await _notify_merchant("rejected")
+        log_admin_action(admin_id, "withdrawal.reject", "withdrawal", withdrawal_id, {"reason": body.reason})
         return res.data[0]
 
     # ── Approve: fetch merchant recipient code ────────────────────────────────
@@ -596,6 +632,7 @@ async def update_withdrawal_status(
             "decided_by": admin_id,
         }).eq("id", withdrawal_id).execute()
         await _notify_merchant("approved")
+        log_admin_action(admin_id, "withdrawal.approve", "withdrawal", withdrawal_id, {"simulated": True})
         return res.data[0]
 
     # ── Prod: initiate real Paystack transfer ─────────────────────────────────
@@ -616,4 +653,5 @@ async def update_withdrawal_status(
         "decided_by": admin_id,
     }).eq("id", withdrawal_id).execute()
     await _notify_merchant("approved")
+    log_admin_action(admin_id, "withdrawal.approve", "withdrawal", withdrawal_id, {"transfer_code": transfer.get("transfer_code")})
     return res.data[0]

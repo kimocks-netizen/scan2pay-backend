@@ -1,0 +1,29 @@
+name: Dependency scan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  pip-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Run pip-audit
+        # Ignored findings, both documented in docs/10_Security.md — Known Risks:
+        #   starlette (transitive via fastapi==0.115.0, which caps it below every
+        #   fixed version) — needs a fastapi major upgrade, tracked separately.
+        #   ecdsa (transitive via python-jose, no fix released) — unreachable in
+        #   practice: our JWTs use HS256 only, never an elliptic-curve algorithm.
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt \
+            --ignore-vuln PYSEC-2026-1943 --ignore-vuln PYSEC-2026-1941 \
+            --ignore-vuln PYSEC-2026-161  --ignore-vuln PYSEC-2026-2281 \
+            --ignore-vuln PYSEC-2026-2280 --ignore-vuln PYSEC-2026-249  \
+            --ignore-vuln PYSEC-2026-248  --ignore-vuln PYSEC-2026-1325

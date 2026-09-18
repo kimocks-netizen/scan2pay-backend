@@ -148,7 +148,12 @@ Resources:
       CorsConfiguration:
         CorsRules:
           - AllowedMethods: [GET, PUT, HEAD]
-            AllowedOrigins: ['*']
+            AllowedOrigins:
+              - 'https://scan2pay.site'
+              - 'https://vula-pay.site'
+              - 'https://vula-pay.co.za'
+              - 'https://vula-pay.xyz'
+              - 'http://localhost:3000'
             AllowedHeaders: ['*', 'content-type', 'x-amz-*']
             ExposedHeaders: [ETag]
             MaxAge: 3600

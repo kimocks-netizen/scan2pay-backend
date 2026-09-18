@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from app.core.audit import log_admin_action
 from app.core.deps import get_current_user_id, require_staff
 from app.db.connection import get_db
 from app.services.s3_service import (
@@ -260,4 +261,8 @@ async def review_kyc_document(
         if msg:
             await send_sms(phone, msg)
 
+    log_admin_action(
+        staff_id, f"kyc.{body.status}", "merchant_document", doc_id,
+        {"merchant_id": merchant_id, "rejection_reason": body.rejection_reason} if body.status == "rejected" else {"merchant_id": merchant_id},
+    )
     return {"doc_id": doc_id, "status": body.status, "merchant_kyc_status": kyc_status}
