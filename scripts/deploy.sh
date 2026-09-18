@@ -65,6 +65,8 @@ ssm_put PAYSTACK_WEBHOOK_SECRET   "${PAYSTACK_WEBHOOK_SECRET:-}"
 ssm_put MASTER_OTP                "${MASTER_OTP:-}"
 ssm_put GOOGLE_CLIENT_ID          "${GOOGLE_CLIENT_ID:-}"
 ssm_put GOOGLE_CLIENT_SECRET      "${GOOGLE_CLIENT_SECRET:-}"
+ssm_put WEBSOCKET_ENDPOINT        "${WEBSOCKET_ENDPOINT:-}"
+ssm_put WS_CONNECTIONS_TABLE      "${WS_CONNECTIONS_TABLE:-}"
 
 # ── SAM build ─────────────────────────────────────────────────────────────────
 info "Building..."

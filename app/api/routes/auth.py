@@ -455,6 +455,27 @@ async def password_reset_confirm(body: PasswordResetConfirmBody, request: Reques
     db.table("users").update({"password_hash": hash_password(body.new_password)}).eq("id", user["id"]).execute()
 
 
+# ── WebSocket handshake token ────────────────────────────────────────────────
+
+class WsTokenResponse(BaseModel):
+    ws_token: str
+
+
+@router.post("/ws-token", response_model=WsTokenResponse)
+async def ws_token(user_id: str = Depends(get_current_user_id)):
+    """Issue a short-lived (60s) token for the WebSocket $connect handshake."""
+    settings = get_settings()
+    from datetime import timedelta
+    expire = datetime.now(timezone.utc) + timedelta(seconds=60)
+    from jose import jwt as _jwt
+    token = _jwt.encode(
+        {"sub": user_id, "exp": expire, "type": "access"},
+        settings.jwt_secret,
+        algorithm=settings.jwt_algorithm,
+    )
+    return WsTokenResponse(ws_token=token)
+
+
 # ── Google OAuth ───────────────────────────────────────────────────────────────
 
 class GoogleAuthBody(BaseModel):

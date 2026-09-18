@@ -1,7 +1,7 @@
 # Scan2Pay — Security Reference
 
 > Living document. Updated as security posture changes.
-> Last updated: 19 September 2026
+> Last updated: 18 September 2026 (evening) — Sprints 1 and 2 both fully closed
 
 ---
 
@@ -50,24 +50,13 @@
 - API Gateway with IAM execution role — least privilege
 
 ### Frontend (scan2pay-web)
-- **CSP headers** — `Content-Security-Policy` set via `next.config.ts` `headers()`, scoped to what the app actually loads (self + Google OAuth + Paystack checkout + the API Gateway origin); `frame-src` allows any `*.paystack.com`/`*.paystack.co` subdomain so Paystack checkout redirects don't need a CSP edit each time; `object-src 'none'`, `frame-ancestors 'self'`, `base-uri 'self'`; `'unsafe-eval'` only added in dev (Turbopack/React dev tooling needs it), never in production builds
+- **CSP headers** — `Content-Security-Policy` set via `next.config.ts` `headers()`, scoped to what the app actually loads (self + Google OAuth + Paystack checkout); `object-src 'none'`, `frame-ancestors 'self'`, `base-uri 'self'`; `'unsafe-eval'` only added in dev (Turbopack/React dev tooling needs it), never in production builds
 - `Cross-Origin-Opener-Policy: same-origin-allow-popups` (needed for the Google OAuth popup flow)
+- **Tokens moved to httpOnly cookies** — `src/app/api/proxy/[...path]/route.ts` is a same-origin BFF proxy: the browser only ever calls `/api/proxy/*` (never the API Gateway URL directly — removed from CSP `connect-src`), the proxy holds the real backend URL and attaches `Authorization: Bearer` server-side. `access_token`/`refresh_token` are stripped out of `/auth/login|register|google|refresh` JSON responses and re-issued as `httpOnly` cookies instead; `localStorage` no longer holds anything sensitive. Refresh-and-retry-once on an expired access token happens transparently inside the proxy, server-side. `middleware.ts` reads the same (now genuinely httpOnly) cookie for its login-gate redirect.
 
 ---
 
 ## Known Risks & Backlog 🔲
-
-### High Priority
-
-| Risk | Detail | Fix |
-|---|---|---|
-| **Tokens in localStorage** | `accessToken` + `refreshToken` stored in localStorage — vulnerable to XSS. Cookie-only would be safer. | Move to `httpOnly` cookies server-side. Requires a Next.js API route as token proxy. |
-
-### Medium Priority
-
-| Risk | Detail | Fix |
-|---|---|---|
-| **Refresh token in localStorage** | Even if access token moves to cookie, refresh token in localStorage is still XSS-exposed | Store refresh token in `httpOnly` cookie too |
 
 ### Low Priority / Future
 
@@ -90,7 +79,7 @@ South Africa's Protection of Personal Information Act applies to all personal da
 | Storage limitation | ✅ | KYC docs auto-deleted from S3 after 730 days |
 | Access controls | ✅ | Role-based access, merchant can only see own data |
 | Breach notification | 🔲 | No incident response plan documented |
-| Data subject rights (access/deletion) | 🟡 | `DELETE /merchants/me` (archive → anonymise after 90 days) done; data export endpoint still missing |
+| Data subject rights (access/deletion) | ✅ | `DELETE /merchants/me` (archive → anonymise after 90 days). Self-service export endpoint deliberately not built — see Won't do. |
 | Privacy policy | 🔲 | Not written yet |
 | Information officer registration | 🔲 | Required for SA businesses processing personal info |
 
@@ -122,7 +111,7 @@ What we do store:
 - [x] Confirm `.env` files are in `.gitignore` and never committed
 
 ### Sprint 2 (before go-live)
-- [ ] Move tokens from localStorage to `httpOnly` cookies
+- [x] Move tokens from localStorage to `httpOnly` cookies (BFF proxy at `/api/proxy`)
 - [x] Add CSP headers in `next.config.ts`
 - [x] Restrict S3 CORS `AllowedOrigins` to production domains
 - [x] Extend audit log to cover admin write actions (`admin_audit_log` table + `/admin/audit-log`)

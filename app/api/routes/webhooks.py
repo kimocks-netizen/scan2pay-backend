@@ -98,6 +98,15 @@ def _handle_charge_success(data: dict, db) -> None:
 
     db.table("transactions").update(updates).eq("id", txn["id"]).execute()
 
+    # push real-time update to any waiting WebSocket connection
+    from app.services.websocket_broadcast import broadcast_to_txn
+    broadcast_to_txn(txn["id"], {
+        "type": "PAYMENT_SUCCESS",
+        "txn_id": txn["id"],
+        "amount_cents": data.get("amount"),
+        "paid_at": updates.get("paid_at"),
+    })
+
     # deactivate single-use payment code
     if single_use:
         db.table("payment_codes").update({"active": False, "paid_at": now}).eq("id", txn["payment_code_id"]).execute()

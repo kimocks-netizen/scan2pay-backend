@@ -49,12 +49,20 @@ Resources:
             ParameterName: !Sub 'scan2pay/${Environment}/*'
         - S3CrudPolicy:
             BucketName: !Ref AssetsBucket
+        - DynamoDBReadPolicy:
+            TableName: !Ref WebSocketConnectionsTable
+        - Statement:
+            - Effect: Allow
+              Action: execute-api:ManageConnections
+              Resource: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${Scan2PayWebSocketApi}/*'
       Environment:
         Variables:
           PAYSTACK_SECRET_KEY: !Sub '{{resolve:ssm:/scan2pay/${Environment}/PAYSTACK_SECRET_KEY}}'
           PAYSTACK_PUBLIC_KEY: !Sub '{{resolve:ssm:/scan2pay/${Environment}/PAYSTACK_PUBLIC_KEY}}'
           PAYSTACK_WEBHOOK_SECRET: !Sub '{{resolve:ssm:/scan2pay/${Environment}/PAYSTACK_WEBHOOK_SECRET}}'
           ASSETS_BUCKET: !Ref AssetsBucket
+          WS_CONNECTIONS_TABLE: !Ref WebSocketConnectionsTable
+          WEBSOCKET_ENDPOINT: !Sub 'https://${Scan2PayWebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/Prod'
       Events:
         ApiProxy:
           Type: Api
@@ -136,6 +144,132 @@ Resources:
             Schedule: cron(30 3 * * ? *)
             Description: Run daily at 03:30 UTC (05:30 SAST)
 
+  # ── WebSocket API Gateway ────────────────────────────────────────────────────
+  Scan2PayWebSocketApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub 'Scan2PayWebSocketAPI-${Environment}'
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: "$request.body.action"
+
+  WebSocketConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Scan2PayWebSocketApi
+      RouteKey: $connect
+      AuthorizationType: NONE
+      Target: !Sub 'integrations/${WebSocketConnectIntegration}'
+
+  WebSocketDisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref Scan2PayWebSocketApi
+      RouteKey: $disconnect
+      AuthorizationType: NONE
+      Target: !Sub 'integrations/${WebSocketDisconnectIntegration}'
+
+  WebSocketConnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref Scan2PayWebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebSocketConnectFunction.Arn}/invocations'
+
+  WebSocketDisconnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref Scan2PayWebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebSocketDisconnectFunction.Arn}/invocations'
+
+  WebSocketStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref Scan2PayWebSocketApi
+      StageName: Prod
+      AutoDeploy: true
+
+  WebSocketConnectPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref WebSocketConnectFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${Scan2PayWebSocketApi}/*/*'
+
+  WebSocketDisconnectPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref WebSocketDisconnectFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${Scan2PayWebSocketApi}/*/*'
+
+  # ── WebSocket Connections Table (DynamoDB) ───────────────────────────────────
+  WebSocketConnectionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'scan2pay-ws-connections-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: connectionId
+          AttributeType: S
+        - AttributeName: txn_id
+          AttributeType: S
+        - AttributeName: merchant_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: connectionId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: txn_id-index
+          KeySchema:
+            - AttributeName: txn_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: merchant_id-index
+          KeySchema:
+            - AttributeName: merchant_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  # ── $connect Lambda ──────────────────────────────────────────────────────────
+  WebSocketConnectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.ws.connect.handler
+      CodeUri: .
+      Description: WebSocket $connect — validate token, store connection
+      MemorySize: 128
+      Timeout: 10
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref WebSocketConnectionsTable
+      Environment:
+        Variables:
+          WS_CONNECTIONS_TABLE: !Ref WebSocketConnectionsTable
+
+  # ── $disconnect Lambda ───────────────────────────────────────────────────────
+  WebSocketDisconnectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: app.ws.disconnect.handler
+      CodeUri: .
+      Description: WebSocket $disconnect — remove connection from DynamoDB
+      MemorySize: 128
+      Timeout: 10
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref WebSocketConnectionsTable
+      Environment:
+        Variables:
+          WS_CONNECTIONS_TABLE: !Ref WebSocketConnectionsTable
+
   # ── S3 bucket for merchant logos, QR images, KYC docs, CMS assets ──────────
   AssetsBucket:
     Type: AWS::S3::Bucket
@@ -185,3 +319,6 @@ Outputs:
   AssetsBucketName:
     Description: S3 bucket for assets
     Value: !Ref AssetsBucket
+  WebSocketEndpoint:
+    Description: WebSocket API endpoint
+    Value: !Sub "wss://${Scan2PayWebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"

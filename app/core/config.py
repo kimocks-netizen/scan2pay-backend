@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     google_client_id: str = ""
     google_client_secret: str = ""
 
+    # ── WebSocket ─────────────────────────────────────────────────────────────
+    websocket_endpoint: str = ""   # https://{id}.execute-api.af-south-1.amazonaws.com/Prod
+    ws_connections_table: str = "" # scan2pay-ws-connections-{env}
+
     # ── Master bypass (admin use only — never expose publicly) ────────────────
     master_otp: str = ""
 
