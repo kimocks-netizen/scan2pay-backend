@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from app.core.config import get_settings
 from app.core.deps import get_current_user_id
+from app.core.rate_limit import check_rate_limit
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -36,6 +37,9 @@ router = APIRouter()
 
 OTP_TTL_MINUTES = 10
 OTP_MAX_ATTEMPTS = 5
+
+LOGIN_MAX_ATTEMPTS = 5
+LOGIN_LOCKOUT_MINUTES = 5
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -212,6 +216,7 @@ async def _reactivate(row: dict, body: RegisterRequest, db, request: Request) ->
 
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 async def register(body: RegisterRequest, request: Request):
+    check_rate_limit("register", request)
     db = get_db()
 
     existing = db.table("users").select("*").eq("phone", body.phone).execute()
@@ -291,6 +296,7 @@ async def register(body: RegisterRequest, request: Request):
 
 @router.post("/login", response_model=AuthResponse)
 async def login(body: LoginRequest, request: Request):
+    check_rate_limit("login", request)
     db = get_db()
 
     phone = normalise_phone(body.identifier)
@@ -306,13 +312,31 @@ async def login(body: LoginRequest, request: Request):
     if user.get("status") == "suspended":
         raise HTTPException(status_code=403, detail={"code": "account_suspended", "message": "This account has been suspended."})
 
+    locked_until = user.get("locked_until")
+    if locked_until and datetime.fromisoformat(locked_until) > datetime.now(timezone.utc):
+        minutes_left = max(1, int((datetime.fromisoformat(locked_until) - datetime.now(timezone.utc)).total_seconds() / 60))
+        raise HTTPException(
+            status_code=423,
+            detail={"code": "account_locked", "message": f"Too many failed attempts. Try again in {minutes_left} minute(s)."},
+        )
+
     if not verify_password(body.password, user["password_hash"]):
+        attempts = user.get("failed_login_attempts", 0) + 1
+        update = {"failed_login_attempts": attempts}
+        if attempts >= LOGIN_MAX_ATTEMPTS:
+            update["locked_until"] = (datetime.now(timezone.utc) + timedelta(minutes=LOGIN_LOCKOUT_MINUTES)).isoformat()
+            update["failed_login_attempts"] = 0
+        db.table("users").update(update).eq("id", user["id"]).execute()
         raise HTTPException(status_code=401, detail={"code": "invalid_credentials", "message": "That password is incorrect."})
 
     mch = db.table("merchants").select("id").eq("user_id", user["id"]).execute()
     merchant_id = mch.data[0]["id"] if mch.data else None
 
-    db.table("users").update({"last_login_at": datetime.now(timezone.utc).isoformat()}).eq("id", user["id"]).execute()
+    db.table("users").update({
+        "last_login_at": datetime.now(timezone.utc).isoformat(),
+        "failed_login_attempts": 0,
+        "locked_until": None,
+    }).eq("id", user["id"]).execute()
 
     if not user.get("phone_verified"):
         await _send_otp_to(user["phone"], db)
@@ -379,7 +403,8 @@ async def me(user_id: str = Depends(get_current_user_id)):
 # ── OTP request ───────────────────────────────────────────────────────────────
 
 @router.post("/otp/request", status_code=status.HTTP_204_NO_CONTENT)
-async def otp_request(body: OtpRequestBody):
+async def otp_request(body: OtpRequestBody, request: Request):
+    check_rate_limit("otp_request", request)
     db = get_db()
     user = db.table("users").select("id").eq("phone", body.phone).execute()
     if not user.data:
@@ -390,7 +415,8 @@ async def otp_request(body: OtpRequestBody):
 # ── OTP verify ────────────────────────────────────────────────────────────────
 
 @router.post("/otp/verify", response_model=PublicUser)
-async def otp_verify(body: OtpVerifyRequest, user_id: str = Depends(get_current_user_id)):
+async def otp_verify(body: OtpVerifyRequest, request: Request, user_id: str = Depends(get_current_user_id)):
+    check_rate_limit("otp_verify", request)
     db = get_db()
     _verify_otp(body.phone, body.code, db)
     db.table("users").update({"phone_verified": True}).eq("id", user_id).execute()
@@ -403,7 +429,8 @@ async def otp_verify(body: OtpVerifyRequest, user_id: str = Depends(get_current_
 # ── Password reset request ────────────────────────────────────────────────────
 
 @router.post("/password-reset/request", status_code=status.HTTP_204_NO_CONTENT)
-async def password_reset_request(body: PasswordResetRequestBody):
+async def password_reset_request(body: PasswordResetRequestBody, request: Request):
+    check_rate_limit("password_reset_request", request)
     db = get_db()
     user = _resolve_user_by_identifier(body.identifier, db)
     if not user:
@@ -414,7 +441,8 @@ async def password_reset_request(body: PasswordResetRequestBody):
 # ── Password reset confirm ────────────────────────────────────────────────────
 
 @router.post("/password-reset/confirm", status_code=status.HTTP_204_NO_CONTENT)
-async def password_reset_confirm(body: PasswordResetConfirmBody):
+async def password_reset_confirm(body: PasswordResetConfirmBody, request: Request):
+    check_rate_limit("password_reset_confirm", request)
     if len(body.new_password) < 6:
         raise HTTPException(status_code=422, detail={"code": "weak_password", "message": "Password must be at least 6 characters."})
 

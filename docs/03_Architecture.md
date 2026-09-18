@@ -37,9 +37,12 @@ Two rules follow from this:
 1. **The webhook is the source of truth.** A payment is only `success` after a
    verified `charge.success` webhook (or an explicit server-side verify call).
    Never trust the browser redirect.
-2. **The merchant screen polls**, it does not wait. `GET /charges/{id}` is
-   called every ~1.5s by the Charge page until `paid_at` is set. (Optional
-   upgrade: SSE at `GET /charges/{id}/events`.)
+2. **The merchant screen receives a push, not a poll.** `PAYMENT_SUCCESS` is
+   pushed via WebSocket to the charge page the moment the webhook fires.
+   The pay page (customer device) receives the same push via its own connection.
+   See `11_WebSocket_RealTime.md` for the full design.
+   The `ReconcilePaystackFunction` cron (every 15 min) remains as a fallback
+   for any missed webhooks.
 
 ## The three code modes
 

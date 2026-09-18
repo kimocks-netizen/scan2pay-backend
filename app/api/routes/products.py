@@ -9,19 +9,19 @@ router = APIRouter()
 
 
 class ProductCreate(BaseModel):
-    name: str
-    description: str | None = None
-    price_cents: int = Field(..., ge=100)
-    sku: str | None = None
-    category: str | None = None
+    name: str = Field(..., min_length=1, max_length=100)
+    description: str | None = Field(None, max_length=500)
+    price_cents: int = Field(..., ge=100, le=9_900_000)
+    sku: str | None = Field(None, max_length=100)
+    category: str | None = Field(None, max_length=100)
 
 
 class ProductUpdate(BaseModel):
-    name: str | None = None
-    description: str | None = None
-    price_cents: int | None = Field(None, ge=100)
-    sku: str | None = None
-    category: str | None = None
+    name: str | None = Field(None, min_length=1, max_length=100)
+    description: str | None = Field(None, max_length=500)
+    price_cents: int | None = Field(None, ge=100, le=9_900_000)
+    sku: str | None = Field(None, max_length=100)
+    category: str | None = Field(None, max_length=100)
     active: bool | None = None
 
 

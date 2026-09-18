@@ -17,10 +17,10 @@ AMOUNT_MAX = 5_000_000
 
 
 class PaymentInitRequest(BaseModel):
-    payment_code_reference: str
+    payment_code_reference: str = Field(..., max_length=20)
     amount_cents: int | None = Field(None, ge=AMOUNT_MIN, le=AMOUNT_MAX)
-    customer_email: str | None = None
-    customer_label: str = "Anonymous"
+    customer_email: str | None = Field(None, max_length=254)
+    customer_label: str = Field("Anonymous", max_length=100)
 
 
 def _merchant_id(user_id: str, db) -> str:

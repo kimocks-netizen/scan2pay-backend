@@ -11,6 +11,25 @@
 - [ ] Catalog page taxi/tip/vendor label adaptation (routes, fares, SKU hidden for taxi)
 
 ### To Do
+
+- [ ] **WebSocket real-time payment updates** — replaces 1.5s polling on `/charge` and `/pay/[reference]`
+  - See `11_WebSocket_RealTime.md` for full design
+  - Backend:
+    - [ ] DynamoDB table `scan2pay-ws-connections-{env}` (connectionId PK, txn_id GSI, merchant_id GSI, TTL)
+    - [ ] `app/ws/connect.py` — `$connect` handler (validate JWT if present, write to DynamoDB)
+    - [ ] `app/ws/disconnect.py` — `$disconnect` handler (delete from DynamoDB)
+    - [ ] `app/services/websocket_broadcast.py` — `broadcast_to_txn(txn_id, message)`
+    - [ ] `webhooks.py` — 4 lines added to `_handle_charge_success()` to call broadcast
+    - [ ] `template.yaml` — WebSocket API GW + DynamoDB table + 2 new Lambdas + IAM policies on `Scan2PayApiFunction`
+    - [ ] `deploy.sh` — add `WEBSOCKET_ENDPOINT` and `WS_CONNECTIONS_TABLE` SSM params
+    - [ ] `config.py` — add `websocket_endpoint` and `ws_connections_table` settings
+  - Frontend:
+    - [ ] `useChargeWebSocket` hook — opens WS after charge created, closes on PAYMENT_SUCCESS or 6min timeout
+    - [ ] `usePayWebSocket` hook — opens WS after initialise, closes on PAYMENT_SUCCESS or 6min timeout
+    - [ ] `/charge` page — replace polling `setInterval` with `useChargeWebSocket`
+    - [ ] `/pay/[reference]` page — replace polling `setInterval` with `usePayWebSocket`
+    - [ ] `.env` — add `NEXT_PUBLIC_WS_URL`
+  - Rollout: keep polling as fallback for 1 sprint, remove once WS confirmed stable in prod
 - [ ] **Multiple bank accounts** — up to 2 per merchant, default selection, withdrawal account picker
   - Migration: `merchant_bank_accounts` table
   - Backend: GET/POST/PATCH/DELETE `/merchants/me/bank-accounts`

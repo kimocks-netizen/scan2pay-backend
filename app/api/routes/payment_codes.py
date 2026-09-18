@@ -9,22 +9,22 @@ router = APIRouter()
 
 
 class CodeCreate(BaseModel):
-    label: str
-    caption: str | None = None
-    mode: str = "variable"          # fixed | amount | variable
+    label: str = Field(..., min_length=1, max_length=100)
+    caption: str | None = Field(None, max_length=100)
+    mode: str = "variable"
     product_id: str | None = None
-    amount_cents: int | None = Field(None, ge=100)
-    description: str | None = None
-    placement: str | None = None
+    amount_cents: int | None = Field(None, ge=100, le=9_900_000)
+    description: str | None = Field(None, max_length=500)
+    placement: str | None = Field(None, max_length=100)
 
 
 class CodeUpdate(BaseModel):
-    label: str | None = None
-    caption: str | None = None
-    placement: str | None = None
+    label: str | None = Field(None, min_length=1, max_length=100)
+    caption: str | None = Field(None, max_length=100)
+    placement: str | None = Field(None, max_length=100)
     active: bool | None = None
-    description: str | None = None
-    amount_cents: int | None = Field(None, ge=100)  # for updating fare on amount-mode codes
+    description: str | None = Field(None, max_length=500)
+    amount_cents: int | None = Field(None, ge=100, le=9_900_000)
 
 
 def _merchant_id(user_id: str, db) -> str:

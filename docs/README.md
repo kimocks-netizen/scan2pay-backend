@@ -28,6 +28,8 @@ Central reference for the entire Scan2Pay platform.
 | 07 | `07_Admin_System.md` | Admin console — pricing versioning, audit log, withdrawal state machine |
 | 08 | `08_Frontend_Roadmap.md` | Next.js migration progress and remaining frontend work |
 | 09 | `09_Backend_Roadmap.md` | FastAPI backend — phase-by-phase build plan, Lambda architecture, SSM parameters |
+| 10 | `10_Security.md` | Security posture, known risks, POPIA compliance, sprint backlog |
+| 11 | `11_WebSocket_RealTime.md` | WebSocket real-time payment updates — replaces polling on `/charge` and `/pay/[reference]` |
 
 ## Projects
 
@@ -64,7 +66,13 @@ Verifies AWS account `542727784619` (profile: `predictiq`) before deploying.
 ### Lambda Summary
 | Lambda | Trigger | Job |
 |--------|---------|-----|
-| `Scan2PayApiFunction` | API Gateway | Entire FastAPI app |
-| `ExpireChargesFunction` | Every 1 min | Expire single-use charges |
-| `ReconcilePaystackFunction` | Every 15 min | Verify pending payments |
-| `BuildSettlementsFunction` | Daily 02:00 SAST | Build merchant payout rows |
+| `Scan2PayApiFunction` | API Gateway HTTP | Entire FastAPI app — all routes |
+| `ExpireChargesFunction` | Every 1 min | Expire stale charge sessions |
+| `ReconcilePaystackFunction` | Every 15 min | Verify pending payments via Paystack |
+| `BuildSettlementsFunction` | Daily 20:00 SAST | Group settled txns into payout rows |
+| `PurgeArchivedAccountsFunction` | Daily 05:30 SAST | POPIA — anonymise archived accounts |
+| `WebSocketConnectFunction` | WebSocket API GW `$connect` | Validate token, store connection in DynamoDB |
+| `WebSocketDisconnectFunction` | WebSocket API GW `$disconnect` | Remove connection from DynamoDB |
+
+> `WebSocketConnectFunction` and `WebSocketDisconnectFunction` are pending implementation.
+> See `11_WebSocket_RealTime.md` for the full design.

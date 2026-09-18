@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.config import get_settings
 from app.core.deps import get_current_user_id
@@ -28,20 +28,20 @@ def _get_merchant(user_id: str, db):
 # ── Models ────────────────────────────────────────────────────────────────────
 
 class MerchantUpdate(BaseModel):
-    business_name: str | None = None
-    display_name: str | None = None
-    trading_category: str | None = None
-    city: str | None = None
-    province: str | None = None
-    settlement_cycle: str | None = None
+    business_name: str | None = Field(None, min_length=2, max_length=100)
+    display_name: str | None = Field(None, min_length=2, max_length=100)
+    trading_category: str | None = Field(None, max_length=100)
+    city: str | None = Field(None, max_length=100)
+    province: str | None = Field(None, max_length=100)
+    settlement_cycle: str | None = Field(None, max_length=50)
 
 
 class PayoutAccountRequest(BaseModel):
-    bank_code: str
-    account_number: str
-    account_holder: str
-    id_number: str | None = None
-    document_type: str = "identityNumber"  # identityNumber | passportNumber
+    bank_code: str = Field(..., max_length=20)
+    account_number: str = Field(..., max_length=30)
+    account_holder: str = Field(..., min_length=2, max_length=100)
+    id_number: str | None = Field(None, max_length=20)
+    document_type: str = Field("identityNumber", max_length=30)
 
 
 class ReferralUpdate(BaseModel):

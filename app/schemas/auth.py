@@ -1,4 +1,4 @@
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 import re
 
 USER_TYPES = {"vendor", "tip", "taxi"}
@@ -16,12 +16,12 @@ def normalise_phone(raw: str) -> str:
 
 
 class RegisterRequest(BaseModel):
-    full_name: str
-    phone: str
-    email: str
-    password: str
+    full_name: str = Field(..., min_length=2, max_length=100)
+    phone: str = Field(..., max_length=20)
+    email: str = Field(..., max_length=254)
+    password: str = Field(..., min_length=6, max_length=128)
     user_type: str
-    business_name: str
+    business_name: str = Field(..., min_length=2, max_length=100)
 
     @field_validator("phone")
     @classmethod
@@ -35,25 +35,18 @@ class RegisterRequest(BaseModel):
             raise ValueError(f"user_type must be one of {USER_TYPES}")
         return v
 
-    @field_validator("password")
-    @classmethod
-    def min_length(cls, v: str) -> str:
-        if len(v) < 6:
-            raise ValueError("Password must be at least 6 characters")
-        return v
-
 
 class LoginRequest(BaseModel):
-    identifier: str   # phone or email
-    password: str
+    identifier: str = Field(..., max_length=254)
+    password: str = Field(..., max_length=128)
 
 
 class RefreshRequest(BaseModel):
-    refresh_token: str
+    refresh_token: str = Field(..., max_length=512)
 
 
 class OtpRequestBody(BaseModel):
-    phone: str
+    phone: str = Field(..., max_length=20)
 
     @field_validator("phone")
     @classmethod
@@ -62,8 +55,8 @@ class OtpRequestBody(BaseModel):
 
 
 class OtpVerifyRequest(BaseModel):
-    phone: str
-    code: str
+    phone: str = Field(..., max_length=20)
+    code: str = Field(..., max_length=64)
 
     @field_validator("phone")
     @classmethod
@@ -93,9 +86,9 @@ class AuthResponse(BaseModel):
 
 
 class PasswordResetRequestBody(BaseModel):
-    identifier: str  # phone or email
+    identifier: str = Field(..., max_length=254)
 
 class PasswordResetConfirmBody(BaseModel):
-    identifier: str  # phone or email
-    code: str
-    new_password: str
+    identifier: str = Field(..., max_length=254)
+    code: str = Field(..., max_length=64)
+    new_password: str = Field(..., min_length=6, max_length=128)

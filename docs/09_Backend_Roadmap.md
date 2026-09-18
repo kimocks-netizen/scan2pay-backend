@@ -154,6 +154,17 @@ OTP bypass: `0000`
 
 ---
 
+## 🔲 Future — Account Archival: History & Admin Filters
+
+Follow-up to the archive/reactivate/purge feature (`018_account_archival.sql`, `DELETE /merchants/me`, `/admin/merchants/{id}/archive|reactivate`, `purge_archived_accounts.py`). Currently we only store the *latest* archive/reactivate state on `users`/`merchants` — no history of past cycles.
+
+- [ ] `account_status_events` table (`id`, `user_id`, `event` [`archived`/`reactivated`], `actor` [`self`/`admin`], `actor_id`, `reason`, `created_at`) — append-only log, one row per archive/reactivate action, so we can show a full timeline for a user who has been archived/reactivated more than once (`reactivation_count` today only gives a number, not a "who/when" trail)
+- [ ] `GET /admin/users/{id}/status-history` — return that timeline for the admin People page (user detail/expand view)
+- [ ] Admin People page filters: status dropdown (`Active` / `Archived` / `Suspended`) and an "archived by" filter (`Self-service` vs `Admin-forced`) on both web and mobile
+- [ ] Surface `archive_reason`/`actor` on the existing status badge tooltip or detail row, not just "Archived · Nd left"
+
+---
+
 ## 🔲 Future — Multiple Bank Accounts
 
 - [ ] Migration: `merchant_bank_accounts` table (`id`, `merchant_id`, `bank_code`, `bank_name`, `account_masked`, `account_name`, `paystack_recipient_code`, `is_default`, `created_at`)

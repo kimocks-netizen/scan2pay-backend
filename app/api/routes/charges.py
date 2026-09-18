@@ -1,10 +1,11 @@
 import logging
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from app.core.deps import get_current_user_id
+from app.core.rate_limit import check_rate_limit
 from app.db.connection import get_db
 from app.services.paystack_service import PaystackError, initialize_transaction
 
@@ -18,13 +19,13 @@ AMOUNT_MAX = 5_000_000
 
 class ChargeCreate(BaseModel):
     amount_cents: int = Field(..., ge=AMOUNT_MIN, le=AMOUNT_MAX)
-    label: str = "Amount due"
+    label: str = Field("Amount due", min_length=1, max_length=100)
 
 
 class PublicPayInit(BaseModel):
     amount_cents: int | None = Field(None, ge=AMOUNT_MIN, le=AMOUNT_MAX)
-    customer_email: str | None = None
-    customer_label: str = "Customer"
+    customer_email: str | None = Field(None, max_length=254)
+    customer_label: str = Field("Customer", max_length=100)
 
 
 def _merchant_id(user_id: str, db) -> str:
@@ -219,8 +220,9 @@ async def resolve_code(reference: str):
 
 
 @router.post("/pay/{reference}/initialise", status_code=201)
-async def public_pay_initialise(reference: str, body: PublicPayInit):
+async def public_pay_initialise(reference: str, body: PublicPayInit, request: Request):
     """Public — no auth. Customer initiates payment from the pay page."""
+    check_rate_limit("pay_init", request)
     db = get_db()
 
     pc_res = db.table("payment_codes").select("*").eq("reference", reference).execute()
