@@ -14,8 +14,12 @@ Deploy: `bash scripts/deploy.sh` from `scan2pay-backend/`
 ## Environment Variables
 ```env
 NEXT_PUBLIC_API_URL=https://8fhbnwufgi.execute-api.af-south-1.amazonaws.com/Prod
-NEXT_PUBLIC_PAY_BASE_URL=https://scan2pay.site/pay
+NEXT_PUBLIC_PAY_BASE_URL=https://vula-pay.co.za/pay
 NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY=pk_test_23c73dd403061843824f61e3cb4cd96bd5220110
+NEXT_PUBLIC_WS_URL=wss://hd4o0s91g8.execute-api.af-south-1.amazonaws.com/Prod
+NEXT_PUBLIC_GA_MEASUREMENT_ID=          # Sprint 2 — Google Analytics 4
+NEXT_PUBLIC_GADS_CONVERSION_ID=         # Sprint 2 — Google Ads
+NEXT_PUBLIC_GADS_CONVERSION_LABEL=      # Sprint 2 — Google Ads
 ```
 
 ---
@@ -24,15 +28,15 @@ NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY=pk_test_23c73dd403061843824f61e3cb4cd96bd5220110
 
 | Route | Description |
 |---|---|
-| `/dashboard` | Stats, 30-day chart, top codes/tips, recent payments. Tip vs vendor layout |
-| `/charge` | Charge session, QR countdown, live per-row expiry badge |
+| `/dashboard` | Stats, 30-day chart, top codes/tips, recent payments. Tip vs vendor layout. `refetchOnWindowFocus` enabled — updates on tab switch after payment |
+| `/charge` | Charge session, QR countdown, live per-row expiry badge. WebSocket via `useChargeWebSocket`, polling kept as fallback |
 | `/my-code` | Primary QR poster, print/download/share buttons |
 | `/catalog` | Product CRUD, QR poster modal/drawer, regenerate QR |
 | `/transactions` | Paginated, status/method/type/settlement filters |
 | `/settings` | Business profile, payout account (modal + mobile drawer), plan card, KYC document upload (id_document, proof_of_bank, selfie with status badges + view button). Approved docs cannot be replaced. |
 | `/withdrawals` | Balance cards, request form, history, cancel with confirmation modal |
 | `/reports` | Period selector, gross/fees/net cards, charts, CSV export |
-| `/pay/[reference]` | Public pay page, all three modes, charge session overlay |
+| `/pay/[reference]` | Public pay page, all three modes, charge session overlay. WebSocket via `usePayWebSocket` |
 
 ---
 
@@ -42,80 +46,67 @@ NEXT_PUBLIC_PAYSTACK_PUBLIC_KEY=pk_test_23c73dd403061843824f61e3cb4cd96bd5220110
 - **Admin:** Overview → Revenue → Transactions → Payouts → People → Pricing → Providers → Audit log → KYC queue → CMS → Support stats
 - **Support:** Overview → People → Transactions → KYC queue → CMS → My stats
 
-### Mobile nav
-Both admin and support use the same bottom-bar + More sheet pattern as the merchant shell (first 4 items in bar, rest in sheet with logout).
-
 ### Pages
 
 | Route | Description |
 |---|---|
-| `/admin/dashboard` | Revenue KPIs, Paystack balance, merchant KPIs, fees chart, merchant growth chart, per-merchant revenue table. Mobile: card view for recent transactions |
-| `/admin/revenue` | Monthly revenue bar (12mo), daily fees + volume area (30d), client growth bar (12mo), txn success vs failed line (12mo). Colour-coded stat chips per chart |
+| `/admin/dashboard` | Revenue KPIs, Paystack balance, merchant KPIs, fees chart, merchant growth chart, per-merchant revenue table |
+| `/admin/revenue` | Monthly revenue bar (12mo), daily fees + volume area (30d), client growth bar (12mo), txn success vs failed line (12mo) |
 | `/admin/transactions` | Platform-wide, merchant filter dropdown, status filter, 10/25/50 page size, pagination |
-| `/admin/withdrawals` | Combined Payouts page — Withdrawals + Settlements tabs. Merchant filter, status filter, 10/25/50 page size, approve/reject actions |
+| `/admin/withdrawals` | Combined Payouts page — Withdrawals + Settlements tabs. Merchant filter, status filter, approve/reject actions |
 | `/admin/settlements` | Redirects to `/admin/withdrawals` |
-| `/admin/people` | Tabbed Businesses + Users. Search, filter pills, server-side pagination (10/25/50). Users show user_type pill |
+| `/admin/people` | Tabbed Businesses + Users. Search, filter pills, server-side pagination |
 | `/admin/pricing` | Pricing versions history, publish new version form |
 | `/admin/providers` | Paystack balance, success rate, method mix table, recent failures |
 | `/admin/audit` | webhook_events log, status filter |
-| `/admin/kyc` | Grouped by merchant (one card per merchant, docs as rows inside). Status filter, view doc (presigned GET + Glacier restore notice), approve, reject with reason modal |
-| `/admin/cms` | 4 image slots (hero, feature_1, feature_2, banner). Local preview before upload, confirm/cancel, full-screen preview modal, alt text input |
+| `/admin/kyc` | Grouped by merchant. Status filter, view doc, approve, reject with reason modal |
+| `/admin/cms` | 4 image slots. Local preview before upload, confirm/cancel, full-screen preview modal |
 | `/admin/support-stats` | All agents' commission breakdown, period selector (admin only) |
-| `/admin/my-stats` | QR encodes full signup URL with `?ref=<code>`. Full-width QR card with logo + URL printed below. Full-width buttons on mobile. Progress bar, rollover display, recent signups table (support only) |
-
-### Key component notes
-- `AdminShell` — desktop sidebar + mobile bottom nav (same pattern as `AppShell`)
-- `ChartPanel` — accepts `stat` prop with `color` for colour-coded top-right values
-- `PaginationBar` — inline in withdrawals page, reusable pattern
+| `/admin/my-stats` | QR encodes full signup URL. Progress bar, rollover display, recent signups table (support only) |
 
 ---
 
-## ✅ Home / Marketing Pages
+## ✅ Home / Marketing Pages (COMPLETE)
 
 | Route | Description |
 |---|---|
-| `/` | Placeholder with header + hero (CMS hero slot as background overlay if available) |
-| `/home` | Full marketing page. Fetches `GET /cms/homepage` server-side (`force-dynamic`, `no-store`). CMS slots: hero → hero image, feature_1/2/banner → story cards. Falls back to static assets |
-
-CMS images use `force-dynamic` + `cache: "no-store"` so new uploads appear immediately.
+| `/` | Placeholder with header + hero |
+| `/home` | Full marketing page. Fetches `GET /cms/homepage` server-side (`force-dynamic`, `no-store`) |
 
 ---
 
 ## ✅ Phase 3 — Referral Signup Flow (COMPLETE)
 
-- [x] Backend: `POST /auth/register` accepts optional `referral_code` → stores `referred_by` on merchant (validated against existing users)
-- [x] Frontend: `?ref=<support_user_id>` pre-read from URL on register page, passed silently through mutation
+- [x] `?ref=<support_user_id>` pre-read from URL on register page, passed silently through mutation
 - [x] QR deep-link encodes full URL: `/login?mode=register&ref=<code>`
 
 ---
 
-## 🔲 Phase 4 — Notifications & Automation
+## ✅ Phase 4 — Notifications & Security (COMPLETE)
 
-- [ ] WinSMS on KYC approval/rejection (`PATCH /admin/kyc/{id}`)
-- [ ] WinSMS on withdrawal approved
-- [ ] Fix `settlement_service.py` — uses `merchant["plan"]`, should be `merchant["plan_id"]`
-- [ ] Merchant plan upgrade flow (self-serve request → support/admin approves)
-- [ ] Wire `GET /cms/homepage` to scan2pay.site marketing site
+- [x] WinSMS on KYC approval/rejection
+- [x] WinSMS on withdrawal approved/rejected
+- [x] Tokens moved to httpOnly cookies — BFF proxy at `/api/proxy/[...path]/route.ts`
+- [x] CSP headers in `next.config.ts`
+- [x] WebSocket real-time updates — `useChargeWebSocket` / `usePayWebSocket` hooks
+- [x] Dashboard `refetchOnWindowFocus` — updates on tab switch after payment
 
 ---
 
-## 🔲 Phase 5 — Production Readiness
+## 🔲 Sprint 2 — Growth & Payments (see `SPRINT.md`)
 
-- [ ] Paystack live keys
-- [ ] `POST /apple-pay/domain` — register `scan2pay.site`
-- [ ] Custom domain for API Gateway
-- [ ] Error monitoring (Sentry or CloudWatch alarms)
-- [ ] Rate limiting (API Gateway usage plans)
-- [ ] Paystack webhook URL confirmed in Paystack dashboard
-- [ ] Verify settlement cron running in prod (CloudWatch logs)
-- [ ] KYC bank validation in prod (test mode always returns `verified=false`)
+- [ ] Google Analytics 4 — `gtag.js`, page views + payment success events
+- [ ] Google Ads conversion tracking — fire on `PAYMENT_SUCCESS` in `usePayWebSocket`
+- [ ] Google Search Console — verification meta tag in `layout.tsx`
+- [ ] Google Sign-In fix — confirm `id_token` vs `access_token` flow in prod
+- [ ] Remove polling fallback from `/charge` page once WS confirmed stable
+- [ ] Notification preferences — channel selector in settings (SMS default, WhatsApp "coming soon")
 
 ---
 
 ## 🔲 Future — Multiple Bank Accounts
 
-- [ ] Up to 2 bank accounts per merchant with a default
-- [ ] Settings page: list accounts, add/remove, set default
+- [ ] Settings page: list accounts with default badge, add/remove, set default
 - [ ] Withdrawal page: account selector when requesting payout
 - [ ] See `09_Backend_Roadmap.md` for full API spec
 
@@ -124,7 +115,7 @@ CMS images use `force-dynamic` + `cache: "no-store"` so new uploads appear immed
 ## API Wiring Status
 
 ### Auth ✅
-`POST /auth/register` · `POST /auth/login` · `POST /auth/refresh` · `POST /auth/logout` · `GET /auth/me` · `POST /auth/otp/request` · `POST /auth/otp/verify`
+`POST /auth/register` · `POST /auth/login` · `POST /auth/refresh` · `POST /auth/logout` · `GET /auth/me` · `POST /auth/otp/request` · `POST /auth/otp/verify` · `POST /auth/ws-token`
 
 ### Merchant ✅
 `GET/PATCH /merchants/me` · `PATCH /merchants/me/payout-account` · `GET /merchants/me/balance`

@@ -5,109 +5,6 @@
 
 ---
 
-## 🏃 Current Sprint — Sprint 1
-
-### In Progress
-- [ ] Catalog page taxi/tip/vendor label adaptation (routes, fares, SKU hidden for taxi)
-
-### To Do
-
-- [ ] **WebSocket real-time payment updates** — replaces 1.5s polling on `/charge` and `/pay/[reference]`
-  - See `11_WebSocket_RealTime.md` for full design
-  - Backend:
-    - [ ] DynamoDB table `scan2pay-ws-connections-{env}` (connectionId PK, txn_id GSI, merchant_id GSI, TTL)
-    - [ ] `app/ws/connect.py` — `$connect` handler (validate JWT if present, write to DynamoDB)
-    - [ ] `app/ws/disconnect.py` — `$disconnect` handler (delete from DynamoDB)
-    - [ ] `app/services/websocket_broadcast.py` — `broadcast_to_txn(txn_id, message)`
-    - [ ] `webhooks.py` — 4 lines added to `_handle_charge_success()` to call broadcast
-    - [ ] `template.yaml` — WebSocket API GW + DynamoDB table + 2 new Lambdas + IAM policies on `Scan2PayApiFunction`
-    - [ ] `deploy.sh` — add `WEBSOCKET_ENDPOINT` and `WS_CONNECTIONS_TABLE` SSM params
-    - [ ] `config.py` — add `websocket_endpoint` and `ws_connections_table` settings
-  - Frontend:
-    - [ ] `useChargeWebSocket` hook — opens WS after charge created, closes on PAYMENT_SUCCESS or 6min timeout
-    - [ ] `usePayWebSocket` hook — opens WS after initialise, closes on PAYMENT_SUCCESS or 6min timeout
-    - [ ] `/charge` page — replace polling `setInterval` with `useChargeWebSocket`
-    - [ ] `/pay/[reference]` page — replace polling `setInterval` with `usePayWebSocket`
-    - [ ] `.env` — add `NEXT_PUBLIC_WS_URL`
-  - Rollout: keep polling as fallback for 1 sprint, remove once WS confirmed stable in prod
-- [ ] **Multiple bank accounts** — up to 2 per merchant, default selection, withdrawal account picker
-  - Migration: `merchant_bank_accounts` table
-  - Backend: GET/POST/PATCH/DELETE `/merchants/me/bank-accounts`
-  - Frontend: settings page list + add/remove + set default
-  - Frontend: withdrawal page account selector
-  - See `09_Backend_Roadmap.md` for full spec
-
-- [ ] **Support commission — qualify on first transaction, not signup**
-  - A referred merchant only counts toward support commission once they make their first successful payment
-  - Prevents support agents creating ghost accounts to inflate their numbers
-  - Backend: `GET /support/my-stats` — filter `referred_by` merchants where at least 1 `success` transaction exists
-  - `recent_signups` table in response: add `first_transaction_at` (null if none yet) and `has_transacted` boolean
-  - Frontend: `/admin/my-stats` recent signups table — add "First transaction" column showing date or "Not yet" badge
-
-- [ ] **Notification preferences** — merchant chooses preferred channel
-  - Add `notification_channel` column on merchants (`sms` default, `email`/`whatsapp` future)
-  - Settings page: channel selector (SMS ticked by default, others greyed out with "coming soon")
-  - Backend: read preference before sending WinSMS
-
-- [ ] **Password reset flow**
-  - `POST /auth/password-reset/request` — sends OTP to phone
-  - `POST /auth/password-reset/confirm` — verifies OTP + sets new password
-  - Frontend: "Forgot password?" link on login page
-  - on my apple when i click enter Password filed it zooms to enlarge if i click in amy input field why is it doing this lets remove this zoom effect, then where we enter verificication code otp lets use small box when you ebter didgit it will aoutomatically moves to next box, alsoa dd your verification code was send to your number ending *** 84 some thing like this , lastly i ddi not received otp
-
-- [ ] **Security Sprint 1** (see `10_Security.md`)
-  - Set `DEV_OTP_BYPASS = False` for prod environment
-  - Rate limiting on `/auth/login` + `/auth/otp/verify`
-  - Restrict S3 CORS to production domain
-  - Confirm `.env` in `.gitignore`
-
----
-
-## 🔲 Sprint 2 — Production Readiness
-
-- [ ] Paystack live keys (swap SSM params)
-- [ ] `POST /apple-pay/domain` — register `scan2pay.site`
-- [ ] Custom domain for API Gateway
-- [ ] Paystack webhook URL confirmed in Paystack dashboard
-- [ ] Wire `GET /cms/homepage` to scan2pay.site marketing site
-- [ ] Verify settlement cron running in prod (CloudWatch logs)
-- [ ] **Security Sprint 2**
-  - Move tokens from localStorage to `httpOnly` cookies
-  - WAF — **deferred** (see `10_Security.md`)
-  - Input size validation — Pydantic field constraints on all schemas (name max 100, amount max R99,000, etc.)
-
-- [ ] **Password reset**
-  - Channel: SMS (default) — email when configured, WhatsApp future
-  - `POST /auth/password-reset/request` — accepts phone or email, sends OTP
-  - `POST /auth/password-reset/confirm` — verifies OTP + sets new password
-  - Frontend: "Forgot password?" link on login page → phone/email input → OTP → new password
-
-- [ ] **Login with Google**
-  - OAuth2 flow via Google Identity
-  - Post-login: if new user → create account → call `PATCH /merchants/me/referral` if `?ref=` present
-  - If existing user → issue JWT same as normal login
-  - Add to sprint backlog — design OAuth flow before building
-  - Account lockout after 10 failed login attempts
-  - Enable CloudTrail in `af-south-1`
-  - CSP headers in `next.config.js`
-
----
-
-## 🔲 Sprint 3 — Post-Launch
-
-- [ ] POPIA compliance — data export + deletion endpoints
-- [ ] Extend audit log to cover admin write actions (who approved withdrawal, who changed plan)
-- [ ] Merchant plan upgrade flow (self-serve request → support/admin approves)
-- [ ] MFA (TOTP) for admin/support roles
-- [ ] Dependency scanning in CI/CD (`pip-audit` + `npm audit`)
-- [ ] Error monitoring (Sentry or CloudWatch alarms)
-- [ ] **Security Sprint 3**
-  - Password reset flow
-  - POPIA data export + deletion
-  - Audit log for admin actions
-
----
-
 ## ✅ Completed
 
 - Phase 1 — Merchant (all routes, charge, QR, catalog, withdrawals, reports)
@@ -120,3 +17,103 @@
 - Admin nav badges (pending KYC + withdrawal counts)
 - Mobile responsive tables (dashboard, KYC, people)
 - Catalog user-type adaptation (taxi routes, tip options, vendor products)
+- Security Sprints 1 & 2 — rate limiting, input limits, account lockout, password reset, httpOnly cookies, CSP, S3 CORS, audit log, dependency scanning
+- WebSocket real-time payment updates — `useChargeWebSocket` / `usePayWebSocket`, DynamoDB connections table, `$connect`/`$disconnect` Lambdas, `broadcast_to_txn` wired into webhook handler, polling kept as fallback
+- Dashboard `refetchOnWindowFocus` — updates on tab switch after payment
+
+---
+
+## 🏃 Current Sprint — Sprint 2: Growth & Payments
+
+### In Progress
+- [ ] Catalog page taxi/tip/vendor label adaptation (routes, fares, SKU hidden for taxi)
+
+### To Do
+
+#### 💳 Payment Methods
+- [ ] **Capitec Pay** — Paystack supports Capitec Pay as a channel; enable on `POST /charges` and `POST /pay/:reference/initialise` by adding `channels: ["card", "capitec_pay"]` to Paystack initialise calls. No new backend routes needed — Paystack renders the Capitec Pay button in the popup automatically.
+- [ ] **Apple Pay** — register `scan2pay.site` domain with Paystack (`POST /apple-pay/domain`). Add `channels: ["card", "apple_pay"]`. Requires HTTPS + domain verification file served at `/.well-known/apple-developer-merchantid-domain-association`.
+- [ ] **Google Pay** — add `channels: ["card", "google_pay"]` to Paystack initialise. No domain registration needed. Works in Chrome on Android automatically once channel is enabled.
+- [ ] **Paystack production keys** — swap SSM params `PAYSTACK_SECRET_KEY` / `PAYSTACK_PUBLIC_KEY` / `PAYSTACK_WEBHOOK_SECRET` to live keys. Update Paystack dashboard webhook URL to `https://{api}/webhooks/paystack`. Test with a real R1.00 transaction before go-live.
+
+#### 📧 Notifications & Comms
+- [ ] **Email notifications** — transactional emails on payment success, KYC decision, withdrawal decision
+  - Provider: AWS SES (same region `af-south-1`, already in the AWS account)
+  - Verify `noreply@scan2pay.site` (or `noreply@vula-pay.co.za`) as SES sender identity
+  - Templates: payment receipt (merchant + customer), KYC approved/rejected, withdrawal approved/rejected
+  - Backend: `app/services/email_service.py` — `send_email(to, subject, html_body)`
+  - Wire into: `webhooks.py` `_handle_charge_success()`, `admin.py` KYC decision, `admin.py` withdrawal decision
+  - Merchant opt-in: read `notification_channel` preference before sending
+- [ ] **SMS (WinSMS) — extend coverage**
+  - Currently: KYC decision + withdrawal decision only
+  - Add: payment success SMS to merchant ("R85.00 received from customer")
+  - Merchant opt-in: read `notification_channel` preference
+- [ ] **WhatsApp notifications** — future channel, not now
+  - Provider: Twilio WhatsApp API or Meta Cloud API — decision needed before building
+  - Placeholder: `notification_channel = "whatsapp"` stored but not yet sent
+  - Mark as "coming soon" in settings UI
+- [ ] **Notification preferences** — merchant chooses preferred channel
+  - Add `notification_channel` column on merchants (`sms` default, `email`, `whatsapp` future)
+  - Settings page: channel selector (SMS ticked by default, WhatsApp greyed out with "coming soon")
+  - Backend: read preference before sending any notification
+- [ ] **Custom transactional emails** — branded HTML templates
+  - Use AWS SES with HTML templates stored in `app/services/email_service.py`
+  - Branding: Scan2Pay / Vula Pay logo, primary colour, footer with unsubscribe link (POPIA)
+  - Templates needed: payment receipt, OTP, KYC decision, withdrawal decision, password reset
+
+#### 📊 Analytics & Ads
+- [ ] **Google Analytics 4** — add `gtag.js` to `scan2pay-web` and `vula-pay-home`
+  - Add `NEXT_PUBLIC_GA_MEASUREMENT_ID` env var
+  - Track: page views (automatic), charge created, payment success, QR scan
+  - Add to CSP `connect-src` and `script-src`
+- [ ] **Google Ads conversion tracking** — fire conversion event on payment success on `/pay/[reference]`
+  - Add `NEXT_PUBLIC_GADS_CONVERSION_ID` + `NEXT_PUBLIC_GADS_CONVERSION_LABEL` env vars
+  - Fire `gtag('event', 'conversion', {...})` in `usePayWebSocket` `onPaymentSuccess` callback
+- [ ] **Google Search Console** — verify `scan2pay.site` and `vula-pay.co.za` ownership
+  - Add verification meta tag to `<head>` in `layout.tsx`
+
+#### 🔐 Auth
+- [ ] **Google Sign-In fix** — current web flow uses `access_token` via tokeninfo endpoint; confirm it works end-to-end in prod with the live Google client ID. Known issue: `azp` vs `aud` mismatch on some token types — may need to switch to `id_token` flow via `@react-oauth/google` on web.
+- [ ] **Remove polling fallback** — `useChargeWebSocket` polling fallback (1.5s `refetchInterval`) confirmed stable in prod; remove the `useQuery` + `useEffect` polling block from `/charge` page.
+
+#### 🏗️ Infrastructure
+- [ ] **Custom domain for API Gateway** — map `api.scan2pay.site` to the API Gateway endpoint via Route 53 + ACM certificate
+- [ ] **Paystack webhook URL** — confirm `https://api.scan2pay.site/webhooks/paystack` is set in Paystack dashboard
+- [ ] **Error monitoring** — CloudWatch alarms on Lambda error rate > 1% + p99 duration > 5s. Optional: Sentry for frontend.
+
+---
+
+## 🔲 Sprint 3 — Mobile Push Notifications
+
+- [ ] **Firebase Cloud Messaging (FCM) — Android push notifications**
+  - Add `@react-native-firebase/messaging` to `scan2pay-app`
+  - Request notification permission on app launch
+  - Register FCM token on login → `POST /merchants/me/push-token` (new endpoint)
+  - Backend: store `fcm_token` on merchants table
+  - Trigger: payment success → `firebase-admin` SDK → `send()` to merchant's FCM token
+  - Lambda: add `firebase-admin` to `requirements.txt`, initialise with service account from SSM
+- [ ] **Apple Push Notification Service (APNs) — iOS push notifications**
+  - Same `@react-native-firebase/messaging` package handles APNs via FCM on iOS
+  - Requires: APNs key (`.p8`) uploaded to Firebase console, Apple Developer team ID + key ID
+  - Add APNs auth key to Firebase project settings — no code change needed beyond FCM setup
+  - Test on physical iOS device (APNs does not work on simulator)
+- [ ] **Push notification types**
+  - `PAYMENT_RECEIVED` — "R85.00 received" — fires from `_handle_charge_success()` alongside WebSocket broadcast
+  - `KYC_DECISION` — "Your KYC has been approved" — fires from admin KYC endpoint
+  - `WITHDRAWAL_DECISION` — "Your withdrawal of R500 has been approved" — fires from admin withdrawal endpoint
+- [ ] **`POST /merchants/me/push-token`** — upsert FCM token for logged-in merchant
+- [ ] **`DELETE /merchants/me/push-token`** — remove on logout
+- [ ] **Notification permission UI** — prompt on first launch, respect OS-level permission
+
+---
+
+## 🔲 Sprint 4 — Post-Launch
+
+- [ ] POPIA compliance — data export + deletion endpoints
+- [ ] Multiple bank accounts (up to 2 per merchant, default selection, withdrawal account picker)
+- [ ] Merchant plan upgrade flow (self-serve request → support/admin approves)
+- [ ] MFA (TOTP) for admin/support roles
+- [ ] WhatsApp notifications (Twilio or Meta Cloud API — provider decision first)
+- [ ] Account status history (`account_status_events` table, admin timeline view)
+- [ ] Support commission — qualify on first transaction, not signup
+

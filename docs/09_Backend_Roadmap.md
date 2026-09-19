@@ -131,9 +131,9 @@ See `11_WebSocket_RealTime.md` for full design. Replaced 1.5s polling on `/charg
 - `015` ✅ — `referred_by` on merchants, `merchant_documents`, `cms_assets`, `support_commissions`
 
 ### S3 Bucket
-- Name: `scan2pay-assets-dev-542727784619`
+- Name: `scan2pay-assets-prod-542727784619`
 - Key structure: `kyc/{merchant_id}/{doc_type}/{doc_id}/{filename}` · `cms/homepage/{slot}/{cms_id}/{filename}`
-- CORS: GET, PUT, HEAD · `AllowedOrigins: ['*']`
+- CORS: GET, PUT, HEAD · `AllowedOrigins: ['https://scan2pay.site', 'https://vula-pay.co.za', 'https://vula-pay.site', 'https://vula-pay.xyz', 'http://localhost:3000']`
 - Lifecycle: KYC → GLACIER_IR 90d → GLACIER 365d → delete 730d; CMS → GLACIER_IR 90d
 - Presigned URLs use regional endpoint `https://s3.af-south-1.amazonaws.com` (required for opt-in regions)
 - `presign_put` signs `ContentType` — frontend must send matching `Content-Type` header
@@ -158,23 +158,32 @@ See `11_WebSocket_RealTime.md` for full design. Replaced 1.5s polling on `/charg
 
 - [x] **WinSMS on KYC decision** — SMS sent in `PATCH /admin/kyc/{doc_id}` when status → verified or failed
 - [x] **WinSMS on withdrawal decision** — SMS sent in `PATCH /admin/withdrawals/{id}/status` when approved or rejected
-- [x] **Settlement fee fix** — `settlement_service.py` already uses `plan_id` correctly
+- [x] **Settlement fee fix** — `settlement_service.py` uses `plan_id` correctly
 - [x] **OTP during registration** — built and wired end-to-end (bypass: `0000` in dev)
-- [ ] Merchant notification preferences (SMS default, email/WhatsApp future) — settings page
-- [ ] Merchant plan upgrade flow (self-serve request → support/admin approves)
 
 ---
 
-## 🔲 Phase 5 — Production Readiness
+## 🔲 Sprint 2 — Growth & Payments (see `SPRINT.md` for full detail)
 
-- [ ] Paystack live keys (swap SSM params)
+- [ ] Paystack live keys (swap SSM params `PAYSTACK_SECRET_KEY` / `PAYSTACK_PUBLIC_KEY` / `PAYSTACK_WEBHOOK_SECRET`)
+- [ ] Capitec Pay, Apple Pay, Google Pay — add channels to Paystack initialise calls
 - [ ] `POST /apple-pay/domain` — register `scan2pay.site`
-- [ ] Custom domain for API Gateway
+- [ ] Custom domain for API Gateway (`api.scan2pay.site`)
 - [ ] Paystack webhook URL confirmed in Paystack dashboard
-- [ ] Verify settlement cron running in prod (CloudWatch logs)
-- [ ] KYC bank validation — test mode always returns `verified=false`
-- [x] Rate limiting — done via `app/core/rate_limit.py` (per-Lambda-instance limiter on auth/OTP/pay endpoints), not API Gateway usage plans — see `10_Security.md`
-- [ ] Error monitoring (CloudWatch alarms or Sentry)
+- [ ] Email notifications via AWS SES — `app/services/email_service.py`, wired into webhook + admin endpoints
+- [ ] Notification preferences — `notification_channel` column on merchants, read before sending
+- [ ] Payment success SMS to merchant (extend WinSMS coverage)
+- [ ] Error monitoring (CloudWatch alarms on Lambda error rate + p99 duration)
+- [ ] KYC bank validation — test mode always returns `verified=false`; confirm prod behaviour
+
+---
+
+## 🔲 Sprint 3 — Mobile Push Notifications (see `SPRINT.md` for full detail)
+
+- [ ] `POST /merchants/me/push-token` — upsert FCM token
+- [ ] `DELETE /merchants/me/push-token` — remove on logout
+- [ ] `firebase-admin` in `requirements.txt`, service account key in SSM
+- [ ] Push on `PAYMENT_RECEIVED`, `KYC_DECISION`, `WITHDRAWAL_DECISION`
 
 ---
 
@@ -197,8 +206,7 @@ Follow-up to the archive/reactivate/purge feature (`018_account_archival.sql`, `
 - [ ] `PATCH /merchants/me/bank-accounts/{id}/default` — set default
 - [ ] `DELETE /merchants/me/bank-accounts/{id}` — remove (cannot remove default if only one)
 - [ ] `POST /merchants/me/withdrawals` — accept optional `bank_account_id`, falls back to default
-- [ ] Settings page: list accounts with default badge, add/remove, set default
-- [ ] Withdrawal page: account selector when requesting payout
+- [ ] Frontend changes — see `08_Frontend_Roadmap.md`
 
 ---
 

@@ -421,6 +421,7 @@ async def list_all_transactions(
     settlement_status: str | None = Query(None),
     merchant_id: str | None = Query(None),
     since: str | None = Query(None),
+    q: str | None = Query(None),
     limit: int = Query(20, ge=1, le=200),
     offset: int = Query(0, ge=0),
     staff_id: str = Depends(require_staff),
@@ -444,6 +445,13 @@ async def list_all_transactions(
     if since:
         count_q = count_q.gte("created_at", since)
         data_q = data_q.gte("created_at", since)
+    if q:
+        # Frontend has sent `q` here for a while — the backend just never had
+        # a matching param, so the admin search box has been a no-op.
+        term = f"%{q}%"
+        or_filter = f"reference.ilike.{term},customer_label.ilike.{term}"
+        count_q = count_q.or_(or_filter)
+        data_q = data_q.or_(or_filter)
 
     count_res = count_q.execute()
     total = count_res.count if count_res.count is not None else 0
@@ -466,35 +474,50 @@ async def get_platform_balance(admin_id: str = Depends(require_admin)):
 
 @router.get("/audit")
 async def list_audit_log(
+    event_type: str | None = Query(None),
+    q: str | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     admin_id: str = Depends(require_admin),
 ):
     db = get_db()
-    res = db.table("webhook_events") \
+    query = db.table("webhook_events") \
         .select("id,event_type,provider_reference,payload,created_at", count="exact") \
         .order("created_at", desc=True) \
-        .limit(limit).offset(offset) \
-        .execute()
+        .limit(limit).offset(offset)
+    if event_type:
+        query = query.eq("event_type", event_type)
+    if q:
+        query = query.or_(f"provider_reference.ilike.%{q}%")
+    res = query.execute()
     return {"data": res.data or [], "total": res.count or 0}
 
 
 @router.get("/audit-log")
 async def list_admin_audit_log(
     action: str | None = Query(None),
+    q: str | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     admin_id: str = Depends(require_admin),
 ):
     """Admin write-action trail — who did what, to which resource, when."""
     db = get_db()
-    q = db.table("admin_audit_log") \
+    query = db.table("admin_audit_log") \
         .select("id,admin_id,action,target_type,target_id,detail,created_at", count="exact") \
         .order("created_at", desc=True) \
         .limit(limit).offset(offset)
     if action:
-        q = q.eq("action", action)
-    res = q.execute()
+        query = query.eq("action", action)
+    if q:
+        # Searches target_id/action only — admin_name isn't a column on this
+        # table (it's resolved below via a join-by-hand on admin_id), and a
+        # cross-table ilike lookup against `users` to support name search hit
+        # an unrelated Supabase-edge (Cloudflare Worker) 500 in testing, so
+        # it's left out rather than shipping something flaky.
+        term = f"%{q}%"
+        query = query.or_(f"target_id.ilike.{term},action.ilike.{term}")
+    res = query.execute()
     entries = res.data or []
 
     if entries:
