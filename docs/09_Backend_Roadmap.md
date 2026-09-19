@@ -1,7 +1,7 @@
 # scan2pay-backend — Backend Roadmap
 
 > Single source of truth for backend state, endpoints, and pending work.
-> Last updated: September 2026
+> Last updated: 19 September 2026
 
 ## Working Rules
 1. **Third-party APIs** — if unsure about exact payload, auth format, or endpoint behaviour (WinSMS, Paystack, etc.), ask the user first. Do not guess.
@@ -52,8 +52,32 @@ OTP bypass: `0000`
 | `ExpireChargesFunction` | EventBridge every 1 min | Set `active=false` on codes past `expires_at` |
 | `ReconcilePaystackFunction` | EventBridge every 15 min | Verify `pending` payments older than 10 min |
 | `BuildSettlementsFunction` | EventBridge daily 18:00 UTC (20:00 SAST) | Settle eligible transactions (T+2 clearing) |
+| `PurgeArchivedAccountsFunction` | EventBridge daily 03:30 UTC | POPIA — anonymise archived accounts after 90 days, delete KYC docs |
+| `WebSocketConnectFunction` | WebSocket API `$connect` | Validate ws-token, write connection to DynamoDB |
+| `WebSocketDisconnectFunction` | WebSocket API `$disconnect` | Remove connection from DynamoDB |
 
 ---
+
+## ✅ Real-Time Payments (WebSockets) — COMPLETE
+
+See `11_WebSocket_RealTime.md` for full design. Replaced 1.5s polling on `/charge` (web + app) and `/pay/[reference]` (web) with WebSocket push on `PAYMENT_SUCCESS`.
+
+- [x] `Scan2PayWebSocketApi` (API Gateway v2, WEBSOCKET) + `websocket_connections` DynamoDB table (6-min TTL)
+- [x] `POST /auth/ws-token` — mints a 60-second single-purpose ticket for the `$connect` handshake (never the real access token — see `10_Security.md`)
+- [x] `app/services/websocket_broadcast.py` — `broadcast_to_txn()`, wired into `webhooks.py`'s `_handle_charge_success()`
+- [x] Web: `useChargeWebSocket`/`usePayWebSocket` hooks, both pages fully migrated off polling
+- [x] Mobile: `useChargeWebSocket` hook, `charge.tsx` migrated off polling (`usePollTransaction`/`chargeApi.poll` removed — no pay-page equivalent needed on mobile, that flow is web-only)
+
+---
+
+## ✅ Security Hardening — Sprints 1 & 2 COMPLETE (see `10_Security.md`)
+
+- [x] Rate limiting, input size limits, account lockout (5 attempts / 5 min), password reset flow
+- [x] Dependency scanning in CI (`pip-audit` + `npm audit`) across all three repos — caught and fixed real CVEs on first run
+- [x] Admin action audit trail (`admin_audit_log` table + `GET /admin/audit-log`) — covers merchant/user status changes, archive/reactivate, KYC review, withdrawal decisions, pricing publish, manual settlements
+- [x] S3 CORS restricted to production domains, CSP headers on web
+- [x] **Tokens moved to httpOnly cookies (web)** — `scan2pay-web/src/app/api/proxy/[...path]/route.ts` is a same-origin BFF proxy; the browser never sees a token, `localStorage` holds nothing sensitive
+- [ ] MFA for admin/support — not now (deliberately deferred)
 
 ## ✅ Phase 1 — Merchant (COMPLETE)
 
@@ -149,7 +173,7 @@ OTP bypass: `0000`
 - [ ] Paystack webhook URL confirmed in Paystack dashboard
 - [ ] Verify settlement cron running in prod (CloudWatch logs)
 - [ ] KYC bank validation — test mode always returns `verified=false`
-- [ ] Rate limiting (API Gateway usage plans)
+- [x] Rate limiting — done via `app/core/rate_limit.py` (per-Lambda-instance limiter on auth/OTP/pay endpoints), not API Gateway usage plans — see `10_Security.md`
 - [ ] Error monitoring (CloudWatch alarms or Sentry)
 
 ---

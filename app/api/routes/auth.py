@@ -21,6 +21,7 @@ from app.db.connection import get_db
 from app.schemas.auth import (
     AuthResponse,
     LoginRequest,
+    LogoutRequest,
     OtpRequestBody,
     OtpVerifyRequest,
     PasswordResetConfirmBody,
@@ -381,7 +382,9 @@ async def refresh_tokens(body: RefreshRequest, request: Request):
 # ── logout ────────────────────────────────────────────────────────────────────
 
 @router.post("/logout", status_code=status.HTTP_204_NO_CONTENT)
-async def logout(body: RefreshRequest):
+async def logout(body: LogoutRequest):
+    if not body.refresh_token:
+        return
     db = get_db()
     token_hash = hash_token(body.refresh_token)
     db.table("refresh_tokens").update({"revoked_at": datetime.now(timezone.utc).isoformat()}).eq("token_hash", token_hash).execute()

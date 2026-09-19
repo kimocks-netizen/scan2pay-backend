@@ -1,7 +1,7 @@
 # Scan2Pay — Security Reference
 
 > Living document. Updated as security posture changes.
-> Last updated: 18 September 2026 (evening) — Sprints 1 and 2 both fully closed
+> Last updated: 19 September 2026 — added WebSocket real-time payment updates
 
 ---
 
@@ -53,6 +53,14 @@
 - **CSP headers** — `Content-Security-Policy` set via `next.config.ts` `headers()`, scoped to what the app actually loads (self + Google OAuth + Paystack checkout); `object-src 'none'`, `frame-ancestors 'self'`, `base-uri 'self'`; `'unsafe-eval'` only added in dev (Turbopack/React dev tooling needs it), never in production builds
 - `Cross-Origin-Opener-Policy: same-origin-allow-popups` (needed for the Google OAuth popup flow)
 - **Tokens moved to httpOnly cookies** — `src/app/api/proxy/[...path]/route.ts` is a same-origin BFF proxy: the browser only ever calls `/api/proxy/*` (never the API Gateway URL directly — removed from CSP `connect-src`), the proxy holds the real backend URL and attaches `Authorization: Bearer` server-side. `access_token`/`refresh_token` are stripped out of `/auth/login|register|google|refresh` JSON responses and re-issued as `httpOnly` cookies instead; `localStorage` no longer holds anything sensitive. Refresh-and-retry-once on an expired access token happens transparently inside the proxy, server-side. `middleware.ts` reads the same (now genuinely httpOnly) cookie for its login-gate redirect.
+
+### WebSocket real-time payment updates (`11_WebSocket_RealTime.md`)
+- **No raw JWT in the WebSocket URL** — the original design doc's `?token=<full access token>` approach was replaced with a short-lived ticket: `POST /auth/ws-token` (authenticated via the httpOnly cookie, through the proxy) mints a **60-second** token purpose-built for the `$connect` handshake, distinct from the real 7-day access token. Even if API Gateway/CloudWatch access logs ever captured the query string, the ticket is worthless within a minute. The real long-lived tokens never appear in a URL, ever.
+- **Merchant (charge page) connections are authenticated** — `app/ws/connect.py` decodes the ticket and rejects (`401`) anything that isn't a valid, unexpired `type: "access"` token before writing the connection to DynamoDB.
+- **Customer (pay page) connections are intentionally unauthenticated** — scoped only by an unguessable, server-issued `txn_id` and a 6-minute DynamoDB TTL; the only thing a connection can ever see is "did this one transaction succeed," no sensitive data.
+- **Connections are ephemeral, not business data** — `websocket_connections` DynamoDB table auto-expires rows via TTL (6 minutes), fully decoupled from Supabase.
+- **Least-privilege IAM** — `WebSocketConnectFunction`/`WebSocketDisconnectFunction` each get `DynamoDBCrudPolicy` scoped to just that one table; the main API Lambda gets read-only `DynamoDBReadPolicy` + `execute-api:ManageConnections` (needed to push `PAYMENT_SUCCESS`), nothing broader.
+- **Known accepted trade-off**: the 60-second ws-token is a real (if extremely short-lived) bearer token — technically usable against any authenticated endpoint, not just the WebSocket handshake, within that window. Not worth the added complexity of a purpose-scoped token type at this scale; revisit if that ever changes.
 
 ---
 

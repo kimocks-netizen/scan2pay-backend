@@ -45,6 +45,13 @@ class RefreshRequest(BaseModel):
     refresh_token: str = Field(..., max_length=512)
 
 
+class LogoutRequest(BaseModel):
+    # Optional — the proxy injects this from its own httpOnly cookie when
+    # present, but that cookie may already be gone (expired/cleared) by the
+    # time logout fires. A missing token here is a no-op, not an error.
+    refresh_token: str | None = Field(None, max_length=512)
+
+
 class OtpRequestBody(BaseModel):
     phone: str = Field(..., max_length=20)
 

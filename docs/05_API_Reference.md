@@ -305,12 +305,12 @@ merchant/user rows for this.
 
 ```json
 {
-  "week":      { "current": { "start": "2026-09-13", "end": "2026-09-17", "merchants": 5, "users": 12 },
-                 "previous": { "start": "2026-09-06", "end": "2026-09-10", "merchants": 3, "users": 9 },
+  "week":      { "current": { "start": "2026-09-13", "end": "2026-09-17", "merchants": 5, "users": 12, "active_merchants": 4, "active_users": 4 },
+                 "previous": { "start": "2026-09-06", "end": "2026-09-10", "merchants": 3, "users": 9, "active_merchants": 3, "active_users": 3 },
                  "elapsed_days": 5 },
   "fortnight": { "current": {...}, "previous": {...}, "elapsed_days": 12 },
-  "month":     { "current": { "label": "Aug 2026", "merchants": 40, "users": 90, ... },
-                 "previous": { "label": "Jul 2026", "merchants": 35, "users": 80, ... } },
+  "month":     { "current": { "label": "Aug 2026", "merchants": 40, "users": 90, "active_merchants": 28, "active_users": 28, ... },
+                 "previous": { "label": "Jul 2026", "merchants": 35, "users": 80, "active_merchants": 22, "active_users": 22, ... } },
   "daily_30":   [ { "label": "20 Aug", "merchants": 2, "users": 5 }, ... ],
   "weekly_12":  [ { "label": "23 Aug", "merchants": 9, "users": 20 }, ... ],
   "monthly_12": [ { "label": "Aug 26", "merchants": 40, "users": 90, "cum_merchants": 812, "cum_users": 1904 }, ... ],
@@ -318,7 +318,7 @@ merchant/user rows for this.
 }
 ```
 
-Two deliberate framing choices, not obvious from the shape alone:
+Three deliberate framing choices, not obvious from the shape alone:
 
 - **Week/fortnight are elapsed-day-matched.** `previous` is truncated to the same number of days
   as `current` (`elapsed_days`) — a partial current week is never compared against a full prior
@@ -326,6 +326,11 @@ Two deliberate framing choices, not obvious from the shape alone:
 - **Month always compares the last two *complete* calendar months** (e.g. August vs July), never
   the current partial month against a complete one — that comparison is simply not offered until
   the month ends. The current partial month still appears as the newest bar in `monthly_12`.
+- **`active_merchants`/`active_users`** = distinct accounts with at least one *successful* transaction
+  (`paid_at` within the window) — usage, not just registration. Only present on `week`/`fortnight`/`month`
+  (not the `daily_30`/`weekly_12`/`monthly_12` trend series). The two fields are always equal today —
+  every non-staff account has exactly one merchant row — kept separate for symmetry with `merchants`/`users`
+  and in case that 1:1 assumption ever changes.
 
 ---
 

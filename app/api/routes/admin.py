@@ -217,7 +217,7 @@ async def list_all_users(
     staff_id: str = Depends(require_staff),
 ):
     db = get_db()
-    q = db.table("users").select("id,full_name,phone,email,user_type,status,created_at,archived_at,reactivated_at", count="exact").order("created_at", desc=True).limit(limit).offset(offset)
+    q = db.table("users").select("id,full_name,phone,email,user_type,status,created_at,archived_at,archive_reason,reactivated_at", count="exact").order("created_at", desc=True).limit(limit).offset(offset)
     if status:
         q = q.eq("status", status)
     res = q.execute()
@@ -292,13 +292,33 @@ def _count_between(rows: list[dict], start: date, end: date) -> int:
     return sum(1 for r in rows if start <= _to_date(r["created_at"]) <= end)
 
 
-def _period(rows_m: list[dict], rows_u: list[dict], start: date, end: date) -> dict:
-    return {
+def _active_between(txn_rows: list[dict], start: date, end: date) -> int:
+    """Count of distinct merchants with >=1 successful transaction in [start, end]."""
+    merchant_ids = {
+        r["merchant_id"] for r in txn_rows
+        if r.get("paid_at") and start <= _to_date(r["paid_at"]) <= end
+    }
+    return len(merchant_ids)
+
+
+def _period(rows_m: list[dict], rows_u: list[dict], start: date, end: date, txn_rows: list[dict] | None = None) -> dict:
+    period = {
         "start": start.isoformat(),
         "end": end.isoformat(),
         "merchants": _count_between(rows_m, start, end),
         "users": _count_between(rows_u, start, end),
     }
+    if txn_rows is not None:
+        # "Active" = had >=1 successful payment in the window. Every regular
+        # account has exactly one merchant row (merchants.user_id), so active
+        # merchants and active users are the same underlying count here —
+        # staff (admin/support) never process payments, so they're excluded
+        # either way. Returned as two fields for symmetry with the totals
+        # the frontend already renders per-audience (Businesses vs Users).
+        active = _active_between(txn_rows, start, end)
+        period["active_merchants"] = active
+        period["active_users"] = active
+    return period
 
 
 @router.get("/growth")
@@ -306,6 +326,15 @@ async def get_growth_stats(staff_id: str = Depends(require_staff)):
     db = get_db()
     m_rows = db.table("merchants").select("created_at").limit(5000).execute().data or []
     u_rows = db.table("users").select("created_at").limit(5000).execute().data or []
+    txn_rows = (
+        db.table("transactions")
+        .select("merchant_id,paid_at")
+        .eq("status", "success")
+        .order("paid_at", desc=True)
+        .limit(5000)
+        .execute()
+        .data or []
+    )
 
     today = datetime.now(timezone.utc).date()
 
@@ -315,8 +344,8 @@ async def get_growth_stats(staff_id: str = Depends(require_staff)):
     prev_week_start = cur_week_start - timedelta(days=7)
     prev_week_end = prev_week_start + timedelta(days=elapsed_week - 1)
     week = {
-        "current": _period(m_rows, u_rows, cur_week_start, today),
-        "previous": _period(m_rows, u_rows, prev_week_start, prev_week_end),
+        "current": _period(m_rows, u_rows, cur_week_start, today, txn_rows),
+        "previous": _period(m_rows, u_rows, prev_week_start, prev_week_end, txn_rows),
         "elapsed_days": elapsed_week,
     }
 
@@ -326,8 +355,8 @@ async def get_growth_stats(staff_id: str = Depends(require_staff)):
     prev_fort_start = cur_fort_start - timedelta(days=14)
     prev_fort_end = prev_fort_start + timedelta(days=elapsed_fort - 1)
     fortnight = {
-        "current": _period(m_rows, u_rows, cur_fort_start, today),
-        "previous": _period(m_rows, u_rows, prev_fort_start, prev_fort_end),
+        "current": _period(m_rows, u_rows, cur_fort_start, today, txn_rows),
+        "previous": _period(m_rows, u_rows, prev_fort_start, prev_fort_end, txn_rows),
         "elapsed_days": elapsed_fort,
     }
 
@@ -338,9 +367,9 @@ async def get_growth_stats(staff_id: str = Depends(require_staff)):
     prev_complete_end = last_complete_start - timedelta(days=1)
     prev_complete_start, _ = _month_bounds(prev_complete_end)
     month = {
-        "current": {**_period(m_rows, u_rows, last_complete_start, last_complete_end),
+        "current": {**_period(m_rows, u_rows, last_complete_start, last_complete_end, txn_rows),
                     "label": last_complete_start.strftime("%b %Y")},
-        "previous": {**_period(m_rows, u_rows, prev_complete_start, prev_complete_end),
+        "previous": {**_period(m_rows, u_rows, prev_complete_start, prev_complete_end, txn_rows),
                      "label": prev_complete_start.strftime("%b %Y")},
     }
 
