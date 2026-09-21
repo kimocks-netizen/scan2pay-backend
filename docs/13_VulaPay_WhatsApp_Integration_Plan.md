@@ -1,6 +1,6 @@
-# Scan2Pay — WhatsApp Integration Plan
+# VulaPay — WhatsApp Integration Plan
 
-> Based on the actual Scan2Pay backend (FastAPI · Supabase · AWS SAM · af-south-1).
+> Based on the actual VulaPay backend (FastAPI · Supabase · AWS SAM · af-south-1).
 > Button-based UI for Sprint 1 & 2. Bedrock natural language as MVP 2.
 > Last updated: September 2026
 
@@ -34,11 +34,14 @@ WhatsApp is the merchant's day-to-day channel. They should be able to do everyth
 |---|---|---|
 | Check available balance | ✅ | ✅ |
 | Check today's earnings | ✅ | ✅ |
+| This month's summary | ✅ | ✅ |
 | View last 10 transactions | ✅ | ✅ |
-| Check if latest payment went through | ✅ | ✅ |
-| Check withdrawal-ready amount | ✅ | ✅ |
-| Request a withdrawal | ❌ redirect to website | ✅ |
-| KYC document upload | ❌ redirect to website | ✅ |
+| Withdrawal status (last 3) | ✅ | ✅ |
+| View active products + prices | ✅ (contextual button) | ✅ |
+| View QR code | ✅ (link to QR image) | ✅ |
+| Withdraw | ❌ redirect to website | ✅ |
+| Create a charge | ❌ redirect to website | ✅ |
+| KYC verification | ❌ redirect to website | ✅ |
 | Payout account changes | ❌ redirect to website | ✅ |
 | Speak to an agent | ✅ (HELP → agent handoff) | ✅ |
 | Receive payment notification | ✅ (automatic) | — |
@@ -49,180 +52,500 @@ WhatsApp is the merchant's day-to-day channel. They should be able to do everyth
 
 ## Conversation UI — Full Flow
 
-### Main menu
+> **UI pattern:** Hybrid — interactive list message (7 rows main menu + Account & Tools sub-list) + 3 quick-tap reply buttons beneath every response + number shortcuts always active. Merchants who use it daily just type `1` and get their balance in 2 seconds. Merchants who are new tap buttons. Both work.
+> My Products is not in the main menu — it surfaces as a contextual button on Balance and Transactions responses, and via keyword `products` anytime.
 
-Shown on any first message, "hi", "menu", "0", or unrecognised input.
+---
 
-Because Meta limits interactive buttons to 3 per message, the menu is split across two messages sent back-to-back:
+### Step 1 — Merchant sends any greeting
 
-**Message 1 (3 buttons):**
+Triggered by: any first message, `hi`, `hello`, `hey`, `good day`, `hola`, or any unrecognised text.
+
 ```
-👋 Welcome to VulaPay
-
-What would you like to do?
-
-[💰 Check Balance]  [📜 Transactions]  [💳 Payment Status]
-```
-
-**Message 2 (3 buttons):**
-```
-More options:
-
-[💸 Withdraw]  [🌐 Open VulaPay]  [❓ Help]
+┌─────────────────────────────────────┐
+│  ← VulaPay                     🔍  │
+├─────────────────────────────────────┤
+│                                     │
+│               Good day 👋     14:32 │
+│                              ✓✓    │
+│                                     │
+│  ┌─────────────────────────────┐   │
+│  │ Good day, Bryne! 👋          │   │
+│  │                             │   │
+│  │ Welcome to VulaPay.         │   │
+│  │ Tap Menu to see what you    │   │
+│  │ can do, or reply with a     │   │
+│  │ number anytime:             │   │
+│  │                             │   │
+│  │ 1️⃣  Balance                  │   │
+│  │ 2️⃣  Today's Earnings         │   │
+│  │ 3️⃣  This Month's Summary     │   │
+│  │ 4️⃣  Recent Transactions      │   │
+│  │ 5️⃣  Withdrawals              │   │
+│  │ 6️⃣  Account & Tools          │   │
+│  │ 0️⃣  Help / Agent             │   │
+│  │                             │   │
+│  │ ⏰ 14:32                    │   │
+│  └─────────────────────────────┘   │
+│                                     │
+│       ┌─────────────────────┐       │
+│       │      📋 Menu        │       │
+│       └─────────────────────┘       │
+│                                     │
+└─────────────────────────────────────┘
 ```
 
 ---
 
-### 1. 💰 Check Balance — button ID: `BALANCE`
+### Step 2 — Merchant taps Menu button
 
-Shows available balance, today's earnings, and withdrawal-ready amount in one reply.
+Opens a WhatsApp **list message** — single tap reveals all 6 options as selectable rows. No 3-button cap applies to list messages.
 
 ```
-💰 Your VulaPay Balance
-
-Available:          R850.00
-Pending settlement: R120.00
-
-Today's earnings:   R340.00
-Ready to withdraw:  R850.00
-
-Reply *0* for menu
+┌─────────────────────────────────────┐
+│  ← VulaPay                     🔍  │
+├─────────────────────────────────────┤
+│                                     │
+│  ┌─────────────────────────────┐   │
+│  │ 📋 VulaPay Menu             │   │
+│  │─────────────────────────────│   │
+│  │ What would you like to do?  │   │
+│  │ Tap an option or reply with │   │
+│  │ its number.                 │   │
+│  │                             │   │
+│  │ 1️⃣  💰 Balance               │   │
+│  │ 2️⃣  📅 Today's Earnings      │   │
+│  │ 3️⃣  📊 This Month           │   │
+│  │ 4️⃣  📜 Recent Transactions   │   │
+│  │ 5️⃣  💸 Withdrawals           │   │
+│  │ 6️⃣  🔧 Account & Tools       │   │
+│  │ 0️⃣  ❓ Help / Agent          │   │
+│  │                             │   │
+│  │ ⏰ 14:33                    │   │
+│  └─────────────────────────────┘   │
+│                                     │
+│  ┌───────────┐  ┌───────────────┐  │
+│  │💰 Balance │  │📅 Today's     │  │
+│  └───────────┘  └───────────────┘  │
+│         ┌───────────────────┐       │
+│         │  📋 Full Menu     │       │
+│         └───────────────────┘       │
+│                                     │
+└─────────────────────────────────────┘
 ```
 
-**Supabase queries:**
-- Available: `transactions` settled net_cents − in-flight withdrawals (same as `GET /merchants/me/balance`)
-- Today's earnings: `transactions` where `status=success` and `paid_at >= today 00:00 SAST`
-- Ready to withdraw: same as available (settled − in-flight)
-- Pending settlement: `transactions` where `status=success` and `settlement_status=pending`
+> **Meta message types used here:**
+> - The numbered list in the body = plain text (always visible)
+> - The 2 quick-tap buttons = `interactive/button` (3 max — we use 2 + "Full Menu" as the third)
+> - Tapping "Full Menu" sends a `interactive/list` message with all 6 rows as selectable sections
 
 ---
 
-### 2. 📜 Transactions — button ID: `TRANSACTIONS`
-
-Shows last 10 successful transactions.
+### Step 2b — Full Menu list (opened by tapping 📋 Full Menu)
 
 ```
-📜 Last 10 Transactions
-
-+ R85.00   · 19 Sep 14:32
-+ R120.00  · 19 Sep 11:05
-+ R50.00   · 19 Sep 09:44
-+ R200.00  · 18 Sep 16:20
-+ R75.00   · 18 Sep 13:11
-+ R90.00   · 18 Sep 10:30
-+ R110.00  · 17 Sep 15:55
-+ R60.00   · 17 Sep 12:00
-+ R45.00   · 16 Sep 17:22
-+ R130.00  · 16 Sep 09:10
-
-View all: scan2pay.site/transactions
-Reply *0* for menu
-```
-
-**Supabase query:** `transactions` where `merchant_id=X`, `status=success`, order by `paid_at desc`, limit 10.
-
----
-
-### 3. 💳 Payment Status — button ID: `PAYMENT_STATUS`
-
-Shows the most recent transaction and its status.
-
-```
-💳 Latest Payment
-
-Amount:  R85.00
-Status:  ✅ Successful
-Date:    19 Sep 2026, 14:32
-Ref:     STP000068070EFA
-
-Reply *0* for menu
-```
-
-If no transactions yet:
-```
-No payments found on your account yet.
-
-Reply *0* for menu
-```
-
-**Supabase query:** `transactions` where `merchant_id=X`, order by `created_at desc`, limit 1.
-
----
-
-### 4. 💸 Withdraw — button ID: `WITHDRAW`
-
-Withdrawals are never processed via WhatsApp. Always redirect to the website.
-
-```
-💸 Withdrawals
-
-Withdrawals are completed securely through your VulaPay account.
-
-Your available balance: R850.00
-
-Tap the link below to request a withdrawal:
-https://scan2pay.site/withdrawals
-
-Reply *0* for menu
-```
-
-The available balance is shown so the merchant knows what they can withdraw before they open the site.
-
----
-
-### 5. 🌐 Open VulaPay — button ID: `WEBSITE`
-
-```
-🌐 VulaPay
-
-https://scan2pay.site
-
-Quick links:
-• Dashboard: scan2pay.site/dashboard
-• Transactions: scan2pay.site/transactions
-• Withdrawals: scan2pay.site/withdrawals
-• Settings: scan2pay.site/settings
-
-Reply *0* for menu
+┌─────────────────────────────────────┐
+│  ← VulaPay                     🔍  │
+├─────────────────────────────────────┤
+│                                     │
+│  ┌─────────────────────────────┐   │
+│  │ 📋 VulaPay Menu             │   │
+│  │─────────────────────────────│   │
+│  │ 💰 Balance                  │   │
+│  │ Check available balance     │   │
+│  │─────────────────────────────│   │
+│  │ 📅 Today's Earnings         │   │
+│  │ What you made today         │   │
+│  │─────────────────────────────│   │
+│  │ 📊 This Month's Summary      │   │
+│  │ Month-to-date totals        │   │
+│  │─────────────────────────────│   │
+│  │ 📜 Recent Transactions      │   │
+│  │ Last 10 payments            │   │
+│  │─────────────────────────────│   │
+│  │ 💸 Withdrawals               │   │
+│  │ Status + request payout     │   │
+│  │─────────────────────────────│   │
+│  │ 🔧 Account & Tools           │   │
+│  │ QR code, charges, KYC       │   │
+│  │─────────────────────────────│   │
+│  │ ❓ Help / Agent              │   │
+│  │ Speak to the team           │   │
+│  └─────────────────────────────┘   │
+│                                     │
+└─────────────────────────────────────┘
 ```
 
 ---
 
-### 6. ❓ Help — button ID: `HELP`
+### Step 2c — Account & Tools sub-list (opened by tapping 🔧 Account & Tools)
 
 ```
-❓ VulaPay Help
-
-For support, reply *agent* to speak to a VulaPay team member.
-
-Common questions:
-• Balance → reply *1*
-• Transactions → reply *2*
-• Payment status → reply *3*
-• Withdraw → reply *4*
-• Website → reply *5*
-
-Or reply *0* for the main menu.
+┌─────────────────────────────────────┐
+│  ← VulaPay                     🔍  │
+├─────────────────────────────────────┤
+│                                     │
+│  ┌─────────────────────────────┐   │
+│  │ 🔧 Account & Tools          │   │
+│  │─────────────────────────────│   │
+│  │ 📷 View QR Code              │   │
+│  │ Your payment QR link        │   │
+│  │─────────────────────────────│   │
+│  │ ⚡ Create Charge              │   │
+│  │ Set amount → vula-pay.co.za │   │
+│  │─────────────────────────────│   │
+│  │ 📄 KYC Verification          │   │
+│  │ Upload docs → vula-pay.co.za│   │
+│  │─────────────────────────────│   │
+│  │ 📊 Withdrawal Status         │   │
+│  │ Track your last payouts     │   │
+│  │─────────────────────────────│   │
+│  │ 🔔 Notifications             │   │
+│  │ Manage alert preferences    │   │
+│  └─────────────────────────────┘   │
+│                                     │
+└─────────────────────────────────────┘
 ```
 
 ---
 
-### 7. Speak to an agent — keyword: `agent`
-
-When a merchant replies "agent" (case-insensitive):
+### Step 3a — Balance (tap row or type `1`)
 
 ```
-👤 Connecting you to a VulaPay agent
-
-A team member will respond shortly during business hours (Mon–Fri, 8am–5pm SAST).
-
-Your account: {business_name}
-Phone: {phone}
-
-Reply *0* to return to the menu.
+┌─────────────────────────────────────┐
+│  ← VulaPay                     🔍  │
+├─────────────────────────────────────┤
+│                                     │
+│                       1       14:34 │
+│                              ✓✓    │
+│                                     │
+│  ┌─────────────────────────────┐   │
+│  │ 💰 Your Balance             │   │
+│  │                             │   │
+│  │ Available:        R 850.00  │   │
+│  │ Pending:          R 120.00  │   │
+│  │ Ready to withdraw: R 850.00 │   │
+│  │                             │   │
+│  │ Reply *0* for menu          │   │
+│  │ ⏰ 14:34                    │   │
+│  └─────────────────────────────┘   │
+│                                     │
+│  ┌───────────┐  ┌───────────────┐  │
+│  │📅 Earnings│  │📜 Transactions│  │
+│  └───────────┘  └───────────────┘  │
+│         ┌───────────────────┐       │
+│         │    📋 Full Menu   │       │
+│         └───────────────────┘       │
+│                                     │
+└─────────────────────────────────────┘
 ```
 
-Backend action: log the handoff request to Supabase (`whatsapp_agent_requests` table: `merchant_id`, `phone`, `requested_at`) so the support team can see it in the admin console. No live chat infrastructure needed in Sprint 2 — the agent sees the request and calls/WhatsApps the merchant back manually.
+---
+
+### Step 3b — Today's Earnings (tap row or type `2`)
+
+```
+┌─────────────────────────────────────┐
+│  ← VulaPay                     🔍  │
+├─────────────────────────────────────┤
+│                                     │
+│                       2       14:35 │
+│                              ✓✓    │
+│                                     │
+│  ┌─────────────────────────────┐   │
+│  │ 📅 Today's Earnings         │   │
+│  │ Thursday, 19 Sep 2026       │   │
+│  │                             │   │
+│  │ Transactions:    6          │   │
+│  │ Total received:  R 610.00   │   │
+│  │ Fees:          - R  36.60   │   │
+│  │ Net earned:      R 573.40   │   │
+│  │                             │   │
+│  │ Reply *0* for menu          │   │
+│  │ ⏰ 14:35                    │   │
+│  └─────────────────────────────┘   │
+│                                     │
+│  ┌───────────┐  ┌───────────────┐  │
+│  │💰 Balance │  │📜 Transactions│  │
+│  └───────────┘  └───────────────┘  │
+│         ┌───────────────────┐       │
+│         │    📋 Full Menu   │       │
+│         └───────────────────┘       │
+│                                     │
+└─────────────────────────────────────┘
+```
+
+---
+
+### Step 3c — Recent Transactions (tap row or type `3`)
+
+```
+┌─────────────────────────────────────┐
+│  ← VulaPay                     🔍  │
+├─────────────────────────────────────┤
+│                                     │
+│                       3       14:36 │
+│                              ✓✓    │
+│                                     │
+│  ┌─────────────────────────────┐   │
+│  │ 📜 Recent Transactions      │   │
+│  │                             │   │
+│  │ + R  85.00  · Today 14:32   │   │
+│  │ + R 120.00  · Today 11:05   │   │
+│  │ + R  50.00  · Today 09:44   │   │
+│  │ + R 200.00  · 18 Sep 16:20  │   │
+│  │ + R  75.00  · 18 Sep 13:11  │   │
+│  │ + R  90.00  · 18 Sep 10:30  │   │
+│  │ + R 110.00  · 17 Sep 15:55  │   │
+│  │ + R  60.00  · 17 Sep 12:00  │   │
+│  │ + R  45.00  · 16 Sep 17:22  │   │
+│  │ + R 130.00  · 16 Sep 09:10  │   │
+│  │                             │   │
+│  │ View all:                   │   │
+│  │ vula-pay.co.za/transactions  │   │
+│  │                             │   │
+│  │ Reply *0* for menu          │   │
+│  │ ⏰ 14:36                    │   │
+│  └─────────────────────────────┘   │
+│                                     │
+│  ┌───────────┐  ┌───────────────┐  │
+│  │💰 Balance │  │💳 Last Payment│  │
+│  └───────────┘  └───────────────┘  │
+│         ┌───────────────────┐       │
+│         │    📋 Full Menu   │       │
+│         └───────────────────┘       │
+│                                     │
+└─────────────────────────────────────┘
+```
+
+---
+
+### Step 3d — Last Payment (tap row or type `4`)
+
+```
+┌─────────────────────────────────────┐
+│  ← VulaPay                     🔍  │
+├─────────────────────────────────────┤
+│                                     │
+│                       4       14:37 │
+│                              ✓✓    │
+│                                     │
+│  ┌─────────────────────────────┐   │
+│  │ 💳 Last Payment             │   │
+│  │                             │   │
+│  │ Amount:   R 85.00           │   │
+│  │ Status:   ✅ Successful      │   │
+│  │ Date:     19 Sep, 14:32     │   │
+│  │ Ref:      STP000068070EFA   │   │
+│  │                             │   │
+│  │ Reply *0* for menu          │   │
+│  │ ⏰ 14:37                    │   │
+│  └─────────────────────────────┘   │
+│                                     │
+│  ┌───────────┐  ┌───────────────┐  │
+│  │💰 Balance │  │📜 Transactions│  │
+│  └───────────┘  └───────────────┘  │
+│         ┌───────────────────┐       │
+│         │    📋 Full Menu   │       │
+│         └───────────────────┘       │
+│                                     │
+└─────────────────────────────────────┘
+```
+
+---
+
+### Step 3e — Withdraw (tap row or type `5`)
+
+```
+┌─────────────────────────────────────┐
+│  ← VulaPay                     🔍  │
+├─────────────────────────────────────┤
+│                                     │
+│                       5       14:38 │
+│                              ✓✓    │
+│                                     │
+│  ┌─────────────────────────────┐   │
+│  │ 💸 Withdrawals              │   │
+│  │                             │   │
+│  │ Available to withdraw:      │   │
+│  │ R 850.00                    │   │
+│  │                             │   │
+│  │ Withdrawals are processed   │   │
+│  │ securely on your account.   │   │
+│  │                             │   │
+│  │ 👉 vula-pay.co.za/withdrawals│   │
+│  │                             │   │
+│  │ Reply *0* for menu          │   │
+│  │ ⏰ 14:38                    │   │
+│  └─────────────────────────────┘   │
+│                                     │
+│  ┌───────────┐  ┌───────────────┐  │
+│  │💰 Balance │  │❓ Help        │  │
+│  └───────────┘  └───────────────┘  │
+│         ┌───────────────────┐       │
+│         │    📋 Full Menu   │       │
+│         └───────────────────┘       │
+│                                     │
+└─────────────────────────────────────┘
+```
+
+---
+
+### Step 3f — Help / Agent (tap row or type `6`)
+
+```
+┌─────────────────────────────────────┐
+│  ← VulaPay                     🔍  │
+├─────────────────────────────────────┤
+│                                     │
+│                       6       14:39 │
+│                              ✓✓    │
+│                                     │
+│  ┌─────────────────────────────┐   │
+│  │ ❓ Help                     │   │
+│  │                             │   │
+│  │ Reply *agent* to speak to   │   │
+│  │ a VulaPay team member.      │   │
+│  │ Mon–Fri · 8am–5pm SAST      │   │
+│  │                             │   │
+│  │ Or jump straight to:        │   │
+│  │ 1️⃣  Balance                  │   │
+│  │ 2️⃣  Today's Earnings         │   │
+│  │ 3️⃣  Recent Transactions      │   │
+│  │ 4️⃣  Last Payment             │   │
+│  │ 5️⃣  Withdraw                 │   │
+│  │                             │   │
+│  │ Reply *0* for menu          │   │
+│  │ ⏰ 14:39                    │   │
+│  └─────────────────────────────┘   │
+│                                     │
+│  ┌───────────────────────────────┐ │
+│  │       💬 Speak to Agent       │ │
+│  └───────────────────────────────┘ │
+│         ┌───────────────────┐       │
+│         │    📋 Full Menu   │       │
+│         └───────────────────┘       │
+│                                     │
+└─────────────────────────────────────┘
+```
+
+---
+
+### Step 3g — Agent handoff (type `agent` or tap 💬 Speak to Agent)
+
+```
+┌─────────────────────────────────────┐
+│  ← VulaPay                     🔍  │
+├─────────────────────────────────────┤
+│                                     │
+│                   agent      14:40  │
+│                              ✓✓    │
+│                                     │
+│  ┌─────────────────────────────┐   │
+│  │ 👤 Agent Request Received   │   │
+│  │                             │   │
+│  │ Hi Bryne, a VulaPay team    │   │
+│  │ member will reach out to    │   │
+│  │ you shortly.                │   │
+│  │                             │   │
+│  │ Business: Bryne's Store     │   │
+│  │ Phone:    +27 61 658 3827   │   │
+│  │                             │   │
+│  │ Hours: Mon–Fri 8am–5pm SAST │   │
+│  │                             │   │
+│  │ Reply *0* for menu          │   │
+│  │ ⏰ 14:40                    │   │
+│  └─────────────────────────────┘   │
+│                                     │
+│         ┌───────────────────┐       │
+│         │    📋 Full Menu   │       │
+│         └───────────────────┘       │
+│                                     │
+└─────────────────────────────────────┘
+```
+
+---
+
+### Main menu — summary of UI types used
+
+| Element | Meta message type | Notes |
+|---|---|---|
+| Greeting body text + number list | `text` | Always visible, no interaction needed |
+| 📋 Menu button on greeting | `interactive/button` | Single CTA button |
+| Main menu rows (7 options) | `interactive/list` | Single button opens it |
+| Account & Tools sub-list (4 options) | `interactive/list` | Second list triggered by row selection |
+| Quick-tap buttons on responses | `interactive/button` | Max 3 — 2 contextual + Full Menu |
+| Number shortcuts `0`–`6`, `agent` | `text` routing | Always active, no button tap needed |
+
+---
+
+### Handler responses — text content
+
+All response text is documented in the UI mockups above. Supabase queries per handler:
+
+**1 — Balance** (`BALANCE` list row or keyword `1`)
+- Available: `transactions` settled `net_cents` − in-flight withdrawals (same logic as `GET /merchants/me/balance`)
+- Pending: `transactions` where `status=success` and `settlement_status=pending`
+- Ready to withdraw: same as available
+- Contextual buttons: `📦 Products` + `📅 Earnings` + `📋 Full Menu`
+
+**2 — Today's Earnings** (`TODAYS_EARNINGS` list row or keyword `2`)
+- `transactions` where `merchant_id=X`, `status=success`, `paid_at >= today 00:00 SAST`
+- Return: count, sum of `amount_cents`, sum of `platform_fee_cents`, net
+- Contextual buttons: `💰 Balance` + `📜 Transactions` + `📋 Full Menu`
+
+**3 — This Month's Summary** (`MONTHLY_SUMMARY` list row or keyword `3`)
+- `transactions` where `merchant_id=X`, `status=success`, `paid_at >= first day of current month SAST`
+- Return: count, sum of `amount_cents`, sum of `platform_fee_cents`, net, total withdrawn this month
+- Contextual buttons: `💰 Balance` + `📅 Today` + `📋 Full Menu`
+
+**4 — Recent Transactions** (`TRANSACTIONS` list row or keyword `4`)
+- `transactions` where `merchant_id=X`, `status=success`, order by `paid_at desc`, limit 10
+- Contextual buttons: `💰 Balance` + `📦 Products` + `📋 Full Menu`
+
+**5 — Withdrawals** (`WITHDRAWALS` list row or keyword `5`)
+- Fetch available balance (same as handler 1) + last 3 withdrawals from `withdrawals` table ordered by `requested_at desc`
+- Show status of each: pending / approved / paid
+- Link to `vula-pay.co.za/withdrawals` to request a new one
+- Never processes a withdrawal — read-only + redirect
+- Contextual buttons: `💰 Balance` + `📜 Transactions` + `📋 Full Menu`
+
+**6 — Account & Tools** (`ACCOUNT_TOOLS` list row or keyword `6`)
+- Sends the Account & Tools sub-list (4 rows: View QR Code, Create Charge, KYC, Withdrawal Status)
+
+**6.1 — View QR Code** (`VIEW_QR` sub-list row or keyword `qr`)
+- Fetch primary payment code reference from `payment_codes` where `merchant_id=X` and `is_primary=true`
+- Reply with link: `vula-pay.co.za/pay/{reference}`
+- Contextual buttons: `💰 Balance` + `⚡ Create Charge` + `📋 Full Menu`
+
+**6.2 — Create Charge** (`CREATE_CHARGE` sub-list row or keyword `charge`)
+- Static reply with link to `vula-pay.co.za/charges`
+- Contextual buttons: `📷 View QR` + `💰 Balance` + `📋 Full Menu`
+
+**6.3 — KYC** (`KYC` sub-list row or keyword `kyc`)
+- Fetch `merchants.kyc_status` — show current status + link to `vula-pay.co.za/settings`
+- Contextual buttons: `💰 Balance` + `❓ Help` + `📋 Full Menu`
+
+**6.4 — Withdrawal Status** (`WITHDRAWAL_STATUS` sub-list row or keyword `wd`)
+- Last 3 withdrawals from `withdrawals` table, show amount + status + date
+- Contextual buttons: `💰 Balance` + `💸 Withdrawals` + `📋 Full Menu`
+
+**6.5 — Notifications** (`NOTIFICATIONS` sub-list row or keyword `notifications`)
+- Static reply showing current `merchants.notification_channel` value
+- Link to `vula-pay.co.za/settings/notifications` for granular preferences
+- Also handles `STOP` (opt out) and `START` (opt back in) as global toggle
+- Contextual buttons: `💰 Balance` + `❓ Help` + `📋 Full Menu`
+
+**0 — Help** (`HELP` list row or keyword `0`, `help`)
+- Static reply. Adds `💬 Speak to Agent` as a single reply button.
+
+**agent** — keyword `agent` or button tap from Help screen
+- Static reply with merchant name + phone
+- Log to `whatsapp_agent_requests` table: `merchant_id`, `phone`, `business_name`, `requested_at`
+
+**products** — keyword `products` (contextual button from Balance / Transactions)
+- `products` where `merchant_id=X`, `active=true`, order by `name`, limit 10
+- Return: name + price for each
 
 ---
 
@@ -230,14 +553,23 @@ Backend action: log the handoff request to Supabase (`whatsapp_agent_requests` t
 
 | Keyword | Action |
 |---|---|
-| `0`, `menu`, `hi`, `hello` | Show main menu |
+| `menu`, `hi`, `hello`, `hey`, `good day` | Show greeting + Menu button |
 | `1` | Balance |
-| `2` | Transactions |
-| `3` | Payment status |
-| `4` | Withdraw |
-| `5` | Open VulaPay |
-| `help`, `6` | Help |
-| `agent` | Request agent handoff |
+| `2` | Today's Earnings |
+| `3` | This Month's Summary |
+| `4` | Recent Transactions |
+| `5` | Withdrawals |
+| `6` | Account & Tools sub-list |
+| `qr` | View QR Code |
+| `charge` | Create Charge link |
+| `kyc` | KYC status + link |
+| `wd` | Withdrawal Status |
+| `notifications` | Notifications status + link |
+| `0`, `help` | Help |
+| `agent` | Agent handoff |
+| `products` | My Products list |
+| `stop` | Opt out — sets `notification_channel = 'sms'` |
+| `start` | Opt back in — sets `notification_channel = 'whatsapp'` |
 
 ---
 
@@ -247,11 +579,11 @@ These fire automatically when events happen. The merchant does not need to messa
 
 | Event | Template | Message |
 |---|---|---|
-| Payment received | `scan2pay_payment_received` | "💰 Payment received\n\nAmount: R{amount}\nRef: {reference}\nNew balance: R{available}" |
-| Withdrawal approved | `scan2pay_withdrawal_approved` | "✅ Withdrawal approved\n\nR{amount} is being processed to your bank account." |
-| Withdrawal rejected | `scan2pay_withdrawal_rejected` | "❌ Withdrawal declined\n\nR{amount} was not processed. Reason: {reason}" |
-| KYC approved | `scan2pay_kyc_approved` | "✅ KYC approved\n\nYour identity has been verified. You can now withdraw." |
-| KYC rejected | `scan2pay_kyc_rejected` | "❌ KYC not approved\n\nReason: {reason}\n\nPlease re-upload at scan2pay.site/settings" |
+| Payment received | `vulapay_payment_received` | "💰 Hi {name}, payment received on VulaPay!\n\nAmount: R{amount}\nRef: {reference}\nAvailable balance: R{balance}" |
+| Withdrawal approved | `vulapay_withdrawal_approved` | "✅ Hi {name}, your withdrawal has been approved on VulaPay!\n\nR{amount} is being processed to your bank account." |
+| Withdrawal rejected | `vulapay_withdrawal_rejected` | "❌ Hi {name}, your withdrawal was unsuccessful on VulaPay.\n\nAmount: R{amount}\nReason: {reason}" |
+| KYC approved | `vulapay_kyc_approved` | "✅ Hi {name}, your KYC has been approved on VulaPay!\n\nYour identity has been verified. You can now request withdrawals." |
+| KYC rejected | `vulapay_kyc_rejected` | "❌ Hi {name}, your KYC was not approved on VulaPay.\n\nReason: {reason}\n\nPlease re-upload at vula-pay.co.za/settings" |
 
 > All outbound notifications use approved Meta templates (no 24-hour window restriction). Template variables are filled server-side before sending.
 
@@ -303,7 +635,7 @@ app/api/routes/webhooks.py
 
 ## What is NEVER done via WhatsApp
 
-- Withdrawals — always redirected to `https://scan2pay.site/withdrawals`
+- Withdrawals — always redirected to `https://vula-pay.co.za/withdrawals`
 - KYC document upload
 - Payout account changes
 - Any write operation that touches money
@@ -354,13 +686,15 @@ Read `merchants.notification_channel` before sending:
 
 ### Templates needed (submit to Meta for approval before Sprint 1 ships)
 
+> Full template bodies are in `docs/whatsapp_templates.md`.
+
 | Template name | Variables |
 |---|---|
-| `scan2pay_payment_received` | `{{1}}` amount, `{{2}}` reference, `{{3}}` new available balance |
-| `scan2pay_withdrawal_approved` | `{{1}}` amount |
-| `scan2pay_withdrawal_rejected` | `{{1}}` amount, `{{2}}` reason |
-| `scan2pay_kyc_approved` | none |
-| `scan2pay_kyc_rejected` | `{{1}}` reason |
+| `vulapay_payment_received` | `{{1}}` first name, `{{2}}` amount, `{{3}}` reference, `{{4}}` new available balance |
+| `vulapay_withdrawal_approved` | `{{1}}` first name, `{{2}}` amount |
+| `vulapay_withdrawal_rejected` | `{{1}}` first name, `{{2}}` amount, `{{3}}` reason |
+| `vulapay_kyc_approved` | `{{1}}` first name |
+| `vulapay_kyc_rejected` | `{{1}}` first name, `{{2}}` reason |
 
 ### Sprint 1 checklist
 
@@ -408,7 +742,7 @@ resolved_at  timestamptz
 
 ### Meta API payloads
 
-**Interactive button message (menu):**
+**1. Greeting message — text body + single Menu button:**
 ```json
 {
   "messaging_product": "whatsapp",
@@ -416,19 +750,77 @@ resolved_at  timestamptz
   "type": "interactive",
   "interactive": {
     "type": "button",
-    "body": { "text": "👋 Welcome to VulaPay\n\nWhat would you like to do?" },
+    "body": {
+      "text": "Good day, Bryne! 👋\n\nWelcome to VulaPay.\nTap Menu to get started, or reply with a number:\n\n1️⃣  💰 Balance\n2️⃣  📅 Today's Earnings\n3️⃣  📜 Recent Transactions\n4️⃣  💳 Last Payment\n5️⃣  💸 Withdraw\n6️⃣  ❓ Help / Agent"
+    },
     "action": {
       "buttons": [
-        { "type": "reply", "reply": { "id": "BALANCE",        "title": "💰 Check Balance" } },
-        { "type": "reply", "reply": { "id": "TRANSACTIONS",   "title": "📜 Transactions" } },
-        { "type": "reply", "reply": { "id": "PAYMENT_STATUS", "title": "💳 Payment Status" } }
+        { "type": "reply", "reply": { "id": "OPEN_MENU", "title": "📋 Menu" } }
       ]
     }
   }
 }
 ```
 
-Second message (3 more options):
+**2. Main menu — interactive list message (7 rows):**
+```json
+{
+  "messaging_product": "whatsapp",
+  "to": "27XXXXXXXXX",
+  "type": "interactive",
+  "interactive": {
+    "type": "list",
+    "body": { "text": "What would you like to do?\nTap an option or reply with its number." },
+    "action": {
+      "button": "📋 VulaPay",
+      "sections": [
+        {
+          "title": "VulaPay",
+          "rows": [
+            { "id": "BALANCE",         "title": "💰 Balance",              "description": "Check available balance" },
+            { "id": "TODAYS_EARNINGS", "title": "📅 Today's Earnings",     "description": "What you made today" },
+            { "id": "MONTHLY_SUMMARY", "title": "📊 This Month's Summary",  "description": "Month-to-date totals" },
+            { "id": "TRANSACTIONS",    "title": "📜 Recent Transactions",  "description": "Last 10 payments" },
+            { "id": "WITHDRAWALS",     "title": "💸 Withdrawals",           "description": "Status + request payout" },
+            { "id": "ACCOUNT_TOOLS",   "title": "🔧 Account & Tools",      "description": "QR code, charges, KYC" },
+            { "id": "HELP",            "title": "❓ Help / Agent",         "description": "Speak to the team" }
+          ]
+        }
+      ]
+    }
+  }
+}
+```
+
+**3. Account & Tools sub-list (4 rows):**
+```json
+{
+  "messaging_product": "whatsapp",
+  "to": "27XXXXXXXXX",
+  "type": "interactive",
+  "interactive": {
+    "type": "list",
+    "body": { "text": "🔧 Account & Tools\n\nTap an option or type a shortcut." },
+    "action": {
+      "button": "🔧 Tools",
+      "sections": [
+        {
+          "title": "Account & Tools",
+          "rows": [
+            { "id": "VIEW_QR",           "title": "📷 View QR Code",       "description": "Your payment QR link" },
+            { "id": "CREATE_CHARGE",     "title": "⚡ Create Charge",      "description": "Set amount → vula-pay.co.za" },
+            { "id": "KYC",              "title": "📄 KYC Verification",   "description": "Upload docs → vula-pay.co.za" },
+            { "id": "WITHDRAWAL_STATUS", "title": "📊 Withdrawal Status",  "description": "Track your last payouts" },
+            { "id": "NOTIFICATIONS",    "title": "🔔 Notifications",      "description": "Manage alert preferences" }
+          ]
+        }
+      ]
+    }
+  }
+}
+```
+
+**3. Response with contextual quick-tap buttons (example: Balance response):**
 ```json
 {
   "messaging_product": "whatsapp",
@@ -436,29 +828,33 @@ Second message (3 more options):
   "type": "interactive",
   "interactive": {
     "type": "button",
-    "body": { "text": "More options:" },
+    "body": {
+      "text": "💰 Your Balance\n\nAvailable:         R 850.00\nPending:           R 120.00\nReady to withdraw: R 850.00\n\nReply *0* for menu"
+    },
     "action": {
       "buttons": [
-        { "type": "reply", "reply": { "id": "WITHDRAW", "title": "💸 Withdraw" } },
-        { "type": "reply", "reply": { "id": "WEBSITE",  "title": "🌐 Open VulaPay" } },
-        { "type": "reply", "reply": { "id": "HELP",     "title": "❓ Help" } }
+        { "type": "reply", "reply": { "id": "TODAYS_EARNINGS", "title": "📅 Earnings" } },
+        { "type": "reply", "reply": { "id": "TRANSACTIONS",    "title": "📜 Transactions" } },
+        { "type": "reply", "reply": { "id": "OPEN_MENU",       "title": "📋 Full Menu" } }
       ]
     }
   }
 }
 ```
 
-**Plain text reply:**
+> Each response uses 2 contextual buttons relevant to what the merchant likely wants next, plus "📋 Full Menu" as the third. This keeps navigation fast without ever hitting the 3-button cap.
+
+**4. Plain text reply (fallback / agent handoff — no buttons needed):**
 ```json
 {
   "messaging_product": "whatsapp",
   "to": "27XXXXXXXXX",
   "type": "text",
-  "text": { "body": "💰 Your VulaPay Balance\n\nAvailable: R850.00\n..." }
+  "text": { "body": "👤 Agent Request Received\n\nHi Bryne, a VulaPay team member will reach out shortly.\n\nBusiness: Bryne's Store\nPhone: +27 61 658 3827\n\nHours: Mon–Fri 8am–5pm SAST\n\nReply *0* for menu" }
 }
 ```
 
-> Plain text replies only work within the 24-hour customer service window (merchant messaged first). Outside that window, only approved templates can be sent.
+> Plain text and interactive replies only work within the 24-hour customer service window (merchant messaged first). Outside that window, only approved templates can be sent.
 
 ### Webhook verification
 
@@ -482,14 +878,23 @@ message.type == "text"         →  message.text.body.strip().lower()     (e.g. 
 
 Routing table:
 ```
-"BALANCE" | "1"                          → handle_balance(merchant)
-"TRANSACTIONS" | "2"                     → handle_transactions(merchant)
-"PAYMENT_STATUS" | "3"                   → handle_payment_status(merchant)
-"WITHDRAW" | "4"                         → handle_withdraw(merchant)
-"WEBSITE" | "5"                          → handle_website()
-"HELP" | "6"                             → handle_help()
-"agent"                                  → handle_agent_request(merchant)
-"0" | "menu" | "hi" | "hello" | unknown  → send_menu(merchant)
+"BALANCE"          | "1"                                     → handle_balance(merchant)
+"TODAYS_EARNINGS"  | "2"                                     → handle_todays_earnings(merchant)
+"MONTHLY_SUMMARY"  | "3"                                     → handle_monthly_summary(merchant)
+"TRANSACTIONS"     | "4"                                     → handle_transactions(merchant)
+"WITHDRAWALS"      | "5"                                     → handle_withdrawals(merchant)
+"ACCOUNT_TOOLS"    | "6"                                     → send_account_tools_submenu(merchant)
+"VIEW_QR"          | "qr"                                    → handle_view_qr(merchant)
+"CREATE_CHARGE"    | "charge"                                → handle_create_charge(merchant)
+"KYC"              | "kyc"                                   → handle_kyc(merchant)
+"WITHDRAWAL_STATUS"| "wd"                                    → handle_withdrawal_status(merchant)
+"NOTIFICATIONS"    | "notifications"                         → handle_notifications(merchant)
+"HELP"             | "0" | "help"                            → handle_help(merchant)
+"agent"            | "AGENT"                                 → handle_agent_request(merchant)
+"products"                                                   → handle_products(merchant)
+"OPEN_MENU"        | "menu" | "hi" | "hello" | unknown        → send_greeting(merchant)
+"stop"             | "STOP"                                  → handle_stop(merchant)
+"start"            | "START"                                 → handle_start(merchant)
 ```
 
 ### Sprint 2 checklist
@@ -497,7 +902,7 @@ Routing table:
 **Backend:**
 - [ ] `GET /webhooks/whatsapp` — hub.challenge verification
 - [ ] `POST /webhooks/whatsapp` — HMAC validation + message routing
-- [ ] `app/services/whatsapp_bot.py` — all 7 handlers + menu sender
+- [ ] `app/services/whatsapp_bot.py` — all 13 handlers + menu sender + sub-list sender
 - [ ] `whatsapp_agent_requests` Supabase table migration
 - [ ] Register webhook URL in Meta App dashboard: `https://{api}/webhooks/whatsapp`
 - [ ] Subscribe to `messages` webhook field in Meta dashboard
@@ -586,9 +991,9 @@ Bedrock is never given a tool that writes data.
 - **WhatsApp OTP** — OTP stays on WinSMS for now
 - **`whatsapp_users` table** — not needed, `users.phone` is the link
 - **Separate WhatsApp Lambda** — webhook lives in `Scan2PayApiFunction` (same as Paystack)
-- **List/catalog messages** — buttons only for Sprint 2
 - **Notification preferences UI** — settings page update is a separate frontend task
 - **Multi-turn conversation state** — each message is stateless in Sprint 2; Bedrock MVP 2 is also stateless
+- **Catalog messages** — not needed, list messages cover the menu use case fully
 
 ---
 
@@ -648,7 +1053,7 @@ Merchant's WhatsApp
 
 ## What is NOT in scope (ever via WhatsApp)
 
-- Withdrawals — always redirected to `https://scan2pay.site/withdrawals`
+- Withdrawals — always redirected to `https://vula-pay.co.za/withdrawals`
 - KYC document upload
 - Payout account changes
 - Any write operation that touches money
@@ -695,8 +1100,8 @@ META_WHATSAPP_WEBHOOK_VERIFY_TOKEN: !Sub '{{resolve:ssm:/scan2pay/${Environment}
 | Payment received | `app/api/routes/webhooks.py` | `_handle_charge_success()` — after transaction update | "💰 Payment received: R{amount}. Ref: {reference}" |
 | Withdrawal approved | `app/api/routes/admin.py` | `_notify_merchant("approved")` — alongside existing `send_sms` | "✅ Your withdrawal of R{amount} has been approved and is being processed." |
 | Withdrawal rejected | `app/api/routes/admin.py` | `_notify_merchant("rejected")` — alongside existing `send_sms` | "❌ Your withdrawal of R{amount} was declined. Reason: {reason}" |
-| KYC approved | `app/api/routes/kyc.py` | alongside existing `send_sms` call | "✅ Your Scan2Pay KYC has been approved. You can now withdraw." |
-| KYC rejected | `app/api/routes/kyc.py` | alongside existing `send_sms` call | "❌ Your Scan2Pay KYC was not approved. Reason: {reason}" |
+| KYC approved | `app/api/routes/kyc.py` | alongside existing `send_sms` call | "✅ Your VulaPay KYC has been approved. You can now withdraw." |
+| KYC rejected | `app/api/routes/kyc.py` | alongside existing `send_sms` call | "❌ Your VulaPay KYC was not approved. Reason: {reason}" |
 
 ### Notification preference
 
@@ -726,11 +1131,11 @@ Content-Type: application/json
 
 | Template name | Trigger | Variables |
 |---|---|---|
-| `scan2pay_payment_received` | Payment success | `{{1}}` = amount (e.g. "R85.00"), `{{2}}` = reference |
-| `scan2pay_withdrawal_approved` | Withdrawal approved | `{{1}}` = amount |
-| `scan2pay_withdrawal_rejected` | Withdrawal rejected | `{{1}}` = amount, `{{2}}` = reason |
-| `scan2pay_kyc_approved` | KYC approved | none |
-| `scan2pay_kyc_rejected` | KYC rejected | `{{1}}` = reason |
+| `vulapay_payment_received` | Payment success | `{{1}}` = amount (e.g. "R85.00"), `{{2}}` = reference |
+| `vulapay_withdrawal_approved` | Withdrawal approved | `{{1}}` = amount |
+| `vulapay_withdrawal_rejected` | Withdrawal rejected | `{{1}}` = amount, `{{2}}` = reason |
+| `vulapay_kyc_approved` | KYC approved | none |
+| `vulapay_kyc_rejected` | KYC rejected | `{{1}}` = reason |
 
 > Until these are approved by Meta, outbound notifications cannot be sent to non-test numbers. The `jaspers_market_plain_text_v1` demo template can be used for testing only.
 
@@ -748,7 +1153,7 @@ Content-Type: application/json
 **Meta:**
 - [ ] Generate long-lived System User token in Meta Business Portfolio
 - [ ] Store token in SSM `/scan2pay/prod/META_WHATSAPP_ACCESS_TOKEN`
-- [ ] Submit `scan2pay_payment_received`, `scan2pay_withdrawal_approved`, `scan2pay_withdrawal_rejected`, `scan2pay_kyc_approved`, `scan2pay_kyc_rejected` templates for Meta approval
+- [ ] Submit `vulapay_payment_received`, `vulapay_withdrawal_approved`, `vulapay_withdrawal_rejected`, `vulapay_kyc_approved`, `vulapay_kyc_rejected` templates for Meta approval
 
 ---
 
@@ -780,7 +1185,7 @@ Route to handler:
   BALANCE     → GET /merchants/me/balance → reply with balance
   TRANSACTIONS → GET /merchants/me/transactions?limit=5 → reply with list
   LAST_PAYMENT → GET /merchants/me/transactions?limit=1&status=success → reply with status
-  WEBSITE     → reply with link to scan2pay.site
+  WEBSITE     → reply with link to vula-pay.co.za
   HELP        → reply with support message
 ```
 
@@ -839,7 +1244,7 @@ POST https://graph.facebook.com/v25.0/{PHONE_NUMBER_ID}/messages
 
 For inbound, we look up the merchant by `users.phone` matching the WhatsApp `from` number. No separate `whatsapp_users` table needed in Sprint 2 — every Scan2Pay merchant registered with their phone number, which is the same number they use on WhatsApp.
 
-If no match is found → reply: "We couldn't find a Scan2Pay account linked to this number. Please sign up at scan2pay.site"
+If no match is found → reply: "We couldn't find a Scan2Pay account linked to this number. Please sign up at vula-pay.co.za"
 
 ### Menu flow
 
@@ -853,7 +1258,7 @@ Button: BALANCE
 Button: TRANSACTIONS
   → query last 5 success transactions for merchant
   → reply: list of "+ R{amount} · {date}" lines
-  → footer: "View all at scan2pay.site/transactions"
+  → footer: "View all at vula-pay.co.za/transactions"
 
 Button: LAST_PAYMENT
   → query last 1 success transaction
@@ -904,7 +1309,7 @@ New SSM param needed:
 - **`whatsapp_users` table** — not needed while we match on `users.phone`
 - **Separate WhatsApp Lambda** — the webhook handler lives in the existing `Scan2PayApiFunction` (same pattern as Paystack webhook)
 - **WhatsApp OTP** — OTP stays on WinSMS for now
-- **List messages / catalog messages** — buttons only for Sprint 2
+- **Catalog messages** — list messages cover the menu use case fully
 - **Notification preferences UI** — settings page update is a separate Sprint 2 frontend task
 
 ---
