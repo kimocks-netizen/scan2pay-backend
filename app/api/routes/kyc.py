@@ -252,10 +252,10 @@ async def review_kyc_document(
     if user_res.data:
         phone = user_res.data[0]["phone"]
         if kyc_status == "verified":
-            msg = "Your Scan2Pay KYC verification is complete. Your account is now fully verified and withdrawal limits have been lifted."
+            msg = "Your VulaPay KYC verification is complete. Your account is now fully verified and withdrawal limits have been lifted."
         elif kyc_status == "failed":
             reason = body.rejection_reason or "Please resubmit the required documents."
-            msg = f"Your Scan2Pay KYC document was rejected. Reason: {reason} Please log in to resubmit."
+            msg = f"Your VulaPay KYC document was rejected. Reason: {reason} Please log in to resubmit."
         else:
             msg = None
         if msg:

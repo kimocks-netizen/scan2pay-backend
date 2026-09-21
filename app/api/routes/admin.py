@@ -644,10 +644,10 @@ async def update_withdrawal_status(
             if not usr.data: return
             amount = f"R{wd['amount_cents'] / 100:.2f}"
             if status == "approved":
-                msg = f"Your Scan2Pay withdrawal of {amount} has been approved and is being processed to your bank account."
+                msg = f"Your VulaPay withdrawal of {amount} has been approved and is being processed to your bank account."
             else:
                 reason = body.reason or "Please contact support for more information."
-                msg = f"Your Scan2Pay withdrawal of {amount} was declined. Reason: {reason}"
+                msg = f"Your VulaPay withdrawal of {amount} was declined. Reason: {reason}"
             await send_sms(usr.data[0]["phone"], msg)
         except Exception:
             pass  # non-fatal
