@@ -83,7 +83,26 @@ class PublicUser(BaseModel):
     avatar_initials: str | None
     phone_verified: bool
     email_verified: bool
+    profile_complete: bool
     created_at: str
+
+
+class CompleteProfileRequest(BaseModel):
+    phone: str = Field(..., max_length=20)
+    user_type: str
+    business_name: str = Field(..., min_length=2, max_length=100)
+
+    @field_validator("phone")
+    @classmethod
+    def normalise(cls, v: str) -> str:
+        return normalise_phone(v)
+
+    @field_validator("user_type")
+    @classmethod
+    def valid_type(cls, v: str) -> str:
+        if v not in USER_TYPES:
+            raise ValueError(f"user_type must be one of {USER_TYPES}")
+        return v
 
 
 class AuthResponse(BaseModel):

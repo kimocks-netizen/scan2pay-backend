@@ -35,6 +35,15 @@ def _merchant_id(user_id: str, db) -> str:
     return res.data[0]["id"]
 
 
+def _require_profile_complete(user_id: str, db) -> None:
+    res = db.table("users").select("profile_complete").eq("id", user_id).execute()
+    if res.data and res.data[0]["profile_complete"] is False:
+        raise HTTPException(status_code=403, detail={
+            "code": "profile_incomplete",
+            "message": "Finish setting up your profile before taking payments.",
+        })
+
+
 def _make_txn_id(db) -> str:
     import secrets
     # use random suffix to avoid collisions — count+1 can duplicate under concurrent requests
@@ -68,6 +77,7 @@ async def create_charge(body: ChargeCreate, user_id: str = Depends(get_current_u
     the transaction and surfaced to the customer when they scan.
     """
     db = get_db()
+    _require_profile_complete(user_id, db)
     mid = _merchant_id(user_id, db)
     pc = _get_primary_code(mid, db)
 

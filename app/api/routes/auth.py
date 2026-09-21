@@ -20,6 +20,7 @@ from app.core.security import (
 from app.db.connection import get_db
 from app.schemas.auth import (
     AuthResponse,
+    CompleteProfileRequest,
     LoginRequest,
     LogoutRequest,
     OtpRequestBody,
@@ -54,7 +55,7 @@ def _user_to_public(row: dict, db, merchant_id: str | None = None) -> PublicUser
     return PublicUser(
         id=row["id"],
         full_name=row["full_name"],
-        phone=row["phone"],
+        phone=row.get("phone") or "",
         email=row.get("email"),
         user_type=row.get("user_type"),
         role=_get_role(row["id"], db),
@@ -63,6 +64,7 @@ def _user_to_public(row: dict, db, merchant_id: str | None = None) -> PublicUser
         avatar_initials=row.get("avatar_initials"),
         phone_verified=row.get("phone_verified", False),
         email_verified=row.get("email_verified", False),
+        profile_complete=row.get("profile_complete", True),
         created_at=row["created_at"],
     )
 
@@ -422,11 +424,11 @@ async def otp_verify(body: OtpVerifyRequest, request: Request, user_id: str = De
     check_rate_limit("otp_verify", request)
     db = get_db()
     _verify_otp(body.phone, body.code, db)
-    db.table("users").update({"phone_verified": True}).eq("id", user_id).execute()
+    db.table("users").update({"phone_verified": True, "profile_complete": True}).eq("id", user_id).execute()
     user = db.table("users").select("*").eq("id", user_id).single().execute().data
     mch = db.table("merchants").select("id").eq("user_id", user_id).execute()
     merchant_id = mch.data[0]["id"] if mch.data else None
-    return _user_to_public(user, merchant_id=merchant_id)
+    return _user_to_public(user, db, merchant_id=merchant_id)
 
 
 # ── Password reset request ────────────────────────────────────────────────────
@@ -558,6 +560,7 @@ async def google_auth(body: GoogleAuthBody, request: Request):
             "user_type": "vendor", "status": "active",
             "avatar_initials": _avatar(full_name),
             "phone_verified": False, "email_verified": bool(email),
+            "profile_complete": False,
         }).execute()
         db.table("user_roles").insert({"id": ur_id, "user_id": user_id, "role": "merchant"}).execute()
         db.table("merchants").insert({
@@ -586,3 +589,49 @@ async def google_auth(body: GoogleAuthBody, request: Request):
         access_token=access,
         refresh_token=refresh,
     )
+
+
+# ── Complete profile (Google sign-up finishes here) ─────────────────────────────
+
+@router.post("/complete-profile", response_model=PublicUser)
+async def complete_profile(
+    body: CompleteProfileRequest, request: Request, user_id: str = Depends(get_current_user_id),
+):
+    """
+    Google sign-up creates an account with no phone, a default "vendor" type
+    and a placeholder business name (profile_complete=False). This fills in
+    the rest and sends the phone its verification OTP — profile_complete only
+    flips to True once that OTP is confirmed via the existing /otp/verify.
+    """
+    check_rate_limit("complete_profile", request)
+    db = get_db()
+
+    existing = db.table("users").select("id").eq("phone", body.phone).execute()
+    if existing.data and existing.data[0]["id"] != user_id:
+        raise HTTPException(status_code=409, detail={"code": "phone_taken", "message": "That mobile number is already registered."})
+
+    db.table("users").update({
+        "phone": body.phone,
+        "user_type": body.user_type,
+        "phone_verified": False,
+    }).eq("id", user_id).execute()
+
+    mch = db.table("merchants").select("id").eq("user_id", user_id).execute()
+    if mch.data:
+        merchant_id = mch.data[0]["id"]
+        db.table("merchants").update({
+            "business_name": body.business_name,
+            "display_name": body.business_name,
+            "trading_category": _category_for(body.user_type),
+        }).eq("id", merchant_id).execute()
+        db.table("payment_codes").update({
+            "label": _caption_for(body.user_type),
+            "caption": _caption_for(body.user_type),
+        }).eq("merchant_id", merchant_id).eq("is_primary", True).execute()
+    else:
+        merchant_id = None
+
+    await _send_otp_to(body.phone, db)
+
+    user = db.table("users").select("*").eq("id", user_id).single().execute().data
+    return _user_to_public(user, db, merchant_id=merchant_id)
