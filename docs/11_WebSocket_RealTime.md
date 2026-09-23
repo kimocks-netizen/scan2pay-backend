@@ -554,18 +554,18 @@ setTxnId(result.txn_id)  // this triggers the WebSocket connection
 - `GET /pay/:reference` endpoint stays — used for initial QR resolution
 - `ExpireChargesFunction` cron stays — still marks expired charge sessions as failed
 - `ReconcilePaystackFunction` cron stays — still catches missed webhooks
-- All existing polling code can be removed from the two frontend pages once
-  WebSocket hooks are confirmed working in staging
 
 ---
 
 ## Rollout Plan
 
-1. Backend: add DynamoDB table + 2 Lambda handlers + broadcast service + webhook wire-up → deploy
-2. Frontend: add `useChargeWebSocket` and `usePayWebSocket` hooks
-3. Test in staging: create charge → pay → confirm PAYMENT_SUCCESS received
-4. Keep polling as fallback for 1 sprint (run both in parallel, polling as safety net)
-5. Remove polling once WebSocket confirmed stable in prod
+1. Backend: add DynamoDB table + 2 Lambda handlers + broadcast service + webhook wire-up → deploy ✅
+2. Frontend: add `useChargeWebSocket` and `usePayWebSocket` hooks ✅
+3. Test in staging: create charge → pay → confirm PAYMENT_SUCCESS received ✅
+4. Keep polling as fallback for 1 sprint (run both in parallel, polling as safety net) ✅
+5. Remove polling once WebSocket confirmed stable in prod ✅ — done; the `/charge` page's
+   `useQuery` + `useEffect` polling block (1.5s `refetchInterval`) has been removed from
+   `scan2pay-web`. `/pay/[reference]` never had a polling fallback to begin with.
 
 ---
 

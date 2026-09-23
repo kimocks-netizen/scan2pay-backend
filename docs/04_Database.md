@@ -33,19 +33,22 @@ CREATE TYPE fee_bearer       AS ENUM ('merchant', 'customer', 'split');
 | --- | --- | --- |
 | `id` | text PK | `usr_…` |
 | `full_name` | text NOT NULL | |
-| `phone` | text NOT NULL UNIQUE | E.164, primary login identifier |
+| `phone` | text UNIQUE | E.164, primary login identifier; nullable — Google sign-up creates the account before a phone is collected |
 | `email` | citext UNIQUE | secondary login identifier |
-| `password_hash` | text NOT NULL | bcrypt; never store plaintext |
+| `password_hash` | text | bcrypt; nullable — Google-only accounts have no password |
+| `google_sub` | text UNIQUE | Google's stable subject id; set on Google sign-in/sign-up, null for phone/password accounts |
 | `user_type` | user_type NOT NULL | wording/defaults only |
-| `role` | user_role NOT NULL DEFAULT 'merchant' | `merchant` \| `admin` |
-| `status` | user_status NOT NULL DEFAULT 'active' | `active` \| `suspended` |
+| `status` | user_status NOT NULL DEFAULT 'active' | `active` \| `suspended` \| `archived` |
 | `avatar_initials` | text | derived at signup |
 | `phone_verified` | boolean NOT NULL DEFAULT false | |
 | `email_verified` | boolean NOT NULL DEFAULT false | |
+| `profile_complete` | boolean NOT NULL DEFAULT true | `false` only for Google sign-ups until they finish `/auth/complete-profile` + OTP verify |
 | `last_login_at` | timestamptz | |
 | `created_at` / `updated_at` | timestamptz NOT NULL | |
 
-Indexes: `UNIQUE(phone)`, `UNIQUE(lower(email))`.
+Role lives in `user_roles` (one row per role per user — `merchant` \| `admin` \| `support`), not on `users` directly.
+
+Indexes: `UNIQUE(phone)`, `UNIQUE(lower(email))`, `UNIQUE(google_sub) WHERE google_sub IS NOT NULL`.
 
 ## `merchants`
 

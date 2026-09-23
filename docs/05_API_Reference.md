@@ -75,7 +75,36 @@ and wrong password in production; the mock distinguishes them.
 ### Phone verification ✅ Live
 
 - `POST /auth/otp/request` `{ "phone": "+27…" }` → 204
-- `POST /auth/otp/verify` `{ "phone": "+27…", "code": "123456" }` → PublicUser
+- `POST /auth/otp/verify` `{ "phone": "+27…", "code": "123456" }` → PublicUser — also flips
+  `profile_complete` to `true` if it was `false` (see below), so the normal register flow and
+  the Google-signup completion flow share this one endpoint.
+
+### Google Sign-In ✅ Live (web only — not wired into `scan2pay-app` yet)
+
+- `POST /auth/google` `{ "access_token": "…", "sub"?, "email"?, "name"? }` (web, implicit-flow
+  access token verified via Google's `tokeninfo` endpoint) or `{ "id_token": "…" }` (mobile,
+  verified via `google-auth`'s `id_token.verify_oauth2_token`) → same 200 body as
+  register/login.
+- A brand-new Google account is created with `phone: null`, `user_type: "vendor"`,
+  `profile_complete: false`, and a placeholder business (`business_name = full_name`,
+  `trading_category = "General"`). It's a fully authenticated session — tokens are issued
+  immediately — but every merchant page redirects to `/complete-profile` until finished.
+- Errors: `google_not_configured` (503, no client ID set), `invalid_google_token` (401),
+  `account_suspended` (403, existing account).
+
+### `POST /auth/complete-profile` ✅ Live — authenticated
+
+```json
+{ "phone": "+27…", "user_type": "vendor", "business_name": "Thandi's Spaza" }
+```
+
+Fills in the phone/type/business name a Google sign-up skipped, updates the merchant + primary
+payment code to match, and sends the phone its OTP (`profile_complete` stays `false` until that
+OTP is confirmed via `POST /auth/otp/verify`). → `PublicUser`. Errors: `phone_taken` (409, phone
+already belongs to a different account).
+
+Charge creation (`POST /charges`) is blocked with a `profile_incomplete` (403) error until this
+flow is finished — a Google account can't take payments with a placeholder profile.
 
 ---
 

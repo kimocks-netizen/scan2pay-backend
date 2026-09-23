@@ -1,7 +1,7 @@
 # Scan2Pay — Sprint Planning
 
 > Working backlog. Items move from To Do → In Progress → Done.
-> Last updated: September 2026
+> Last updated: 22 September 2026
 
 ---
 
@@ -16,17 +16,18 @@
 - Support role (commission tracking, referral QR, my-stats page)
 - Admin nav badges (pending KYC + withdrawal counts)
 - Mobile responsive tables (dashboard, KYC, people)
-- Catalog user-type adaptation (taxi routes, tip options, vendor products)
 - Security Sprints 1 & 2 — rate limiting, input limits, account lockout, password reset, httpOnly cookies, CSP, S3 CORS, audit log, dependency scanning
-- WebSocket real-time payment updates — `useChargeWebSocket` / `usePayWebSocket`, DynamoDB connections table, `$connect`/`$disconnect` Lambdas, `broadcast_to_txn` wired into webhook handler, polling kept as fallback
+- WebSocket real-time payment updates — `useChargeWebSocket` / `usePayWebSocket`, DynamoDB connections table, `$connect`/`$disconnect` Lambdas, `broadcast_to_txn` wired into webhook handler — polling fallback removed from `/charge` (confirmed stable in prod)
 - Dashboard `refetchOnWindowFocus` — updates on tab switch after payment
+- Google Sign-In (web) — fixed two real bugs found in prod: `users.google_sub` column never existed (migration `021_google_auth.sql`), and Google-only signups violated the `phone`/`password_hash` NOT NULL constraints (migration relaxed both). The `azp`/`aud` audience check was already correct — no `id_token` migration needed. New accounts land in a `profile_complete: false` state and are routed through `/complete-profile` (phone + OTP + account type + business name) before they can take any payment (`POST /charges` returns `403 profile_incomplete` otherwise) — web and mobile both have the guard, though mobile has no Google button wired up yet
+- Catalog page taxi/tip/vendor label adaptation (routes, fares, SKU hidden for taxi) — web was already correct in both its create and edit forms; fixed a real bug on mobile where the form drawer only distinguished taxi vs. everything-else, so tip-earner users saw vendor labels ("Product name", "Price (R)") instead of tip labels ("Label", "Amount (R)") when creating/editing a tip option
 
 ---
 
 ## 🏃 Current Sprint — Sprint 2: Growth & Payments
 
 ### In Progress
-- [ ] Catalog page taxi/tip/vendor label adaptation (routes, fares, SKU hidden for taxi)
+_(none)_
 
 ### To Do
 
@@ -73,8 +74,7 @@
   - Add verification meta tag to `<head>` in `layout.tsx`
 
 #### 🔐 Auth
-- [ ] **Google Sign-In fix** — current web flow uses `access_token` via tokeninfo endpoint; confirm it works end-to-end in prod with the live Google client ID. Known issue: `azp` vs `aud` mismatch on some token types — may need to switch to `id_token` flow via `@react-oauth/google` on web.
-- [ ] **Remove polling fallback** — `useChargeWebSocket` polling fallback (1.5s `refetchInterval`) confirmed stable in prod; remove the `useQuery` + `useEffect` polling block from `/charge` page.
+- [ ] **Google Sign-In on mobile** — the backend (`POST /auth/google`, `/auth/complete-profile`) already accepts an `id_token` flow for this and the app's `PublicUser`/`profileComplete` plumbing + `/complete-profile` screen are already built; just needs the actual Google Sign-In button wired up in `scan2pay-app` (e.g. `@react-native-google-signin/google-signin` or Expo's AuthSession) — currently a disabled "Coming soon" button on `(auth)/login.tsx`.
 
 #### 🏗️ Infrastructure
 - [ ] **Custom domain for API Gateway** — map `api.scan2pay.site` to the API Gateway endpoint via Route 53 + ACM certificate
