@@ -192,15 +192,55 @@ Reply with a number to get started:
 
 ---
 
+## Template 6 — Daily Summary (Digest)
+
+**Template name:** `vulapay_daily_summary`
+**Category:** UTILITY
+**Language:** en_US
+
+**Header:** `Your VulaPay daily summary`
+
+**Body:**
+```
+📊 Hi {{1}}, here's your summary for {{2}}:
+
+Payments: {{3}}
+Total received: R{{4}}
+Fees: R{{5}}
+Net earned: R{{6}}
+
+View transactions: vula-pay.co.za/transactions
+```
+
+**Footer:** `Reply STOP to opt out of WhatsApp notifications`
+
+**Variables:**
+| Variable | Source | Example |
+|---|---|---|
+| `{{1}}` | `users.full_name.split()[0]` — first name only | `Bryne` |
+| `{{2}}` | date formatted `DD Mon YYYY` | `19 Sep 2026` |
+| `{{3}}` | count of successful transactions today | `6` |
+| `{{4}}` | `sum(amount_cents) / 100:.2f` for today | `610.00` |
+| `{{5}}` | `sum(platform_fee_cents) / 100:.2f` for today | `36.60` |
+| `{{6}}` | net earned `(total − fees) / 100:.2f` for today | `573.40` |
+
+**When it fires:**
+Sent by the `SendDailyDigestFunction` cron at 19:00 SAST (17:00 UTC) to merchants
+whose `notification_prefs.payments_whatsapp_mode = 'digest'`.
+Not sent if the merchant had zero transactions that day.
+
+---
+
 ## Variable summary across all templates
 
-| Template | `{{1}}` | `{{2}}` | `{{3}}` | `{{4}}` |
-|---|---|---|---|---|
-| `vulapay_payment_received` | first name | amount | reference | balance |
-| `vulapay_withdrawal_approved` | first name | amount | — | — |
-| `vulapay_withdrawal_rejected` | first name | amount | reason | — |
-| `vulapay_kyc_approved` | first name | — | — | — |
-| `vulapay_kyc_rejected` | first name | reason | — | — |
+| Template | `{{1}}` | `{{2}}` | `{{3}}` | `{{4}}` | `{{5}}` | `{{6}}` |
+|---|---|---|---|---|---|---|
+| `vulapay_payment_received` | first name | amount | reference | balance | — | — |
+| `vulapay_withdrawal_approved` | first name | amount | — | — | — | — |
+| `vulapay_withdrawal_rejected` | first name | amount | reason | — | — | — |
+| `vulapay_kyc_approved` | first name | — | — | — | — | — |
+| `vulapay_kyc_rejected` | first name | reason | — | — | — | — |
+| `vulapay_daily_summary` | first name | date | tx count | total received | fees | net earned |
 
 ---
 
@@ -212,7 +252,7 @@ Reply with a number to get started:
 - [ ] Paste header exactly as shown — plain text, no emojis
 - [ ] Paste body exactly as shown — emojis, variables and URL included
 - [ ] Paste footer exactly as shown — `Reply STOP to opt out of WhatsApp notifications`
-- [ ] Submit all 5 for review
+- [ ] Submit all 6 for review
 - [ ] Approval usually takes 24–48h — do not start Sprint 1 build until at least `vulapay_payment_received` is approved
 - [ ] Once approved, update template names in `app/services/whatsapp_service.py`
 
