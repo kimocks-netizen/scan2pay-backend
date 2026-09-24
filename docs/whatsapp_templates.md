@@ -1,11 +1,11 @@
 # VulaPay — WhatsApp Message Templates
 
-> Submit all 5 to Meta Business Manager under category: **UTILITY**
+> Submit all 6 to Meta Business Manager under category: **UTILITY**
 > Language: **English (en_US)**
 > Header: plain text only — no emojis, no variables (Meta requirement)
-> Body: emojis + variables + website URL
+> Body: emojis + variables only — no URLs in body
 > Footer: static plain text opt-out
-> No CTA button — notification preferences managed via Account & Tools in the WhatsApp bot
+> CTA button: only on **Template 6** (daily digest) — no button on per-event templates 1–5
 
 ---
 
@@ -24,8 +24,6 @@
 Amount: R{{2}}
 Reference: {{3}}
 Available balance: R{{4}}
-
-View transactions: vula-pay.co.za/transactions
 ```
 
 **Footer:** `Reply STOP to opt out of WhatsApp notifications`
@@ -53,8 +51,6 @@ View transactions: vula-pay.co.za/transactions
 ✅ Hi {{1}}, your withdrawal has been approved!
 
 R{{2}} is being processed to your bank account. This usually takes 1–2 business days.
-
-View withdrawals: vula-pay.co.za/withdrawals
 ```
 
 **Footer:** `Reply STOP to opt out of WhatsApp notifications`
@@ -82,7 +78,7 @@ View withdrawals: vula-pay.co.za/withdrawals
 Amount: R{{2}}
 Reason: {{3}}
 
-Please visit vula-pay.co.za/withdrawals or reply to this message for help.
+Please reply to this message for help.
 ```
 
 **Footer:** `Reply STOP to opt out of WhatsApp notifications`
@@ -109,8 +105,6 @@ Please visit vula-pay.co.za/withdrawals or reply to this message for help.
 ✅ Hi {{1}}, your KYC has been approved!
 
 Your identity has been verified. You can now request withdrawals.
-
-Visit vula-pay.co.za to get started.
 ```
 
 **Footer:** `Reply STOP to opt out of WhatsApp notifications`
@@ -136,7 +130,7 @@ Visit vula-pay.co.za to get started.
 
 Reason: {{2}}
 
-Please re-upload your documents at vula-pay.co.za/settings. If you need help, reply to this message.
+Please re-upload your documents. If you need help, reply to this message.
 ```
 
 **Footer:** `Reply STOP to opt out of WhatsApp notifications`
@@ -146,49 +140,6 @@ Please re-upload your documents at vula-pay.co.za/settings. If you need help, re
 |---|---|---|
 | `{{1}}` | `users.full_name.split()[0]` — first name only | `Bryne` |
 | `{{2}}` | rejection reason from admin | `ID document is expired` |
-
----
-
-## How first name is extracted (backend)
-
-All 5 templates use `{{1}}` as first name. Extract it consistently at send time:
-
-```python
-first_name = (user["full_name"] or "").split()[0] if user.get("full_name") else "there"
-```
-
-Fallback to `"there"` if `full_name` is null — message reads `Hi there,` instead of breaking.
-
----
-
-## STOP opt-out handler (Sprint 2)
-
-When a merchant replies `STOP`:
-1. Update `merchants.notification_channel = 'sms'`
-2. Reply with confirmation:
-```
-You have been unsubscribed from VulaPay WhatsApp notifications.
-You will continue to receive SMS notifications.
-
-To resubscribe, reply START anytime.
-```
-
-When a merchant replies `START`:
-1. Update `merchants.notification_channel = 'whatsapp'`
-2. Reply with confirmation:
-```
-✅ You are now subscribed to VulaPay WhatsApp notifications.
-
-Reply with a number to get started:
-1 - Balance
-2 - Today's Earnings
-3 - This Month's Summary
-4 - Recent Transactions
-```
-
-> Full notification preferences (per event type, per channel) will be managed via
-> Account & Tools → 🔔 Notifications → vula-pay.co.za/settings/notifications
-> STOP/START is a blunt global toggle for now — granular control comes with the preferences page.
 
 ---
 
@@ -208,11 +159,15 @@ Payments: {{3}}
 Total received: R{{4}}
 Fees: R{{5}}
 Net earned: R{{6}}
-
-View transactions: vula-pay.co.za/transactions
 ```
 
 **Footer:** `Reply STOP to opt out of WhatsApp notifications`
+
+**Button:** CTA — Visit Website
+| Field | Value |
+|---|---|
+| Button text | `View transactions` |
+| URL | `https://app.vula-pay.co.za/transactions` |
 
 **Variables:**
 | Variable | Source | Example |
@@ -250,8 +205,10 @@ Not sent if the merchant had zero transactions that day.
 - [ ] Go to **WhatsApp Manager → Message Templates → Create Template**
 - [ ] For each template: set category = **UTILITY**, language = **English (en_US)**
 - [ ] Paste header exactly as shown — plain text, no emojis
-- [ ] Paste body exactly as shown — emojis, variables and URL included
+- [ ] Paste body exactly as shown — emojis and variables only, **no URLs in body**
 - [ ] Paste footer exactly as shown — `Reply STOP to opt out of WhatsApp notifications`
+- [ ] For **Template 6 only**: add CTA button — type = **Visit Website**, text = `View transactions`, URL = `https://app.vula-pay.co.za/transactions`
+- [ ] Templates 1–5: no button
 - [ ] Submit all 6 for review
 - [ ] Approval usually takes 24–48h — do not start Sprint 1 build until at least `vulapay_payment_received` is approved
 - [ ] Once approved, update template names in `app/services/whatsapp_service.py`
