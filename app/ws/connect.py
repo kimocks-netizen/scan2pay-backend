@@ -21,10 +21,11 @@ def _table():
 def handler(event: dict, context) -> dict:
     connection_id = event["requestContext"]["connectionId"]
     params = event.get("queryStringParameters") or {}
-    txn_id = params.get("txn_id")
+    txn_id = params.get("txn_id")  # optional — charge page connections
     token = params.get("token")
 
-    if not txn_id:
+    # token is required for merchant-scoped connections
+    if not token and not txn_id:
         return {"statusCode": 400}
 
     merchant_id = None
@@ -34,11 +35,15 @@ def handler(event: dict, context) -> dict:
             return {"statusCode": 401}
         merchant_id = payload.get("sub")
 
+    # txn_id-only connections (charge page, no auth) are still allowed
+    if not txn_id and not merchant_id:
+        return {"statusCode": 400}
+
     try:
         _table().put_item(Item={
             "connectionId": connection_id,
-            "txn_id": txn_id,
-            "merchant_id": merchant_id,
+            "txn_id": txn_id or "__merchant__",  # GSI requires a value
+            "merchant_id": merchant_id or "",
             "connected_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
             "ttl": int(time.time()) + TTL_SECONDS,
         })

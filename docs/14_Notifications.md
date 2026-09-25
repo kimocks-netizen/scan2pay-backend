@@ -508,38 +508,40 @@ This replaces the scattered `send_sms()` calls in `admin.py`, `kyc.py`, and
 ### Phase 1 — Bell + Push (highest value, no external dependencies)
 
 **Backend:**
-- [ ] `notifications` table migration
-- [ ] `notification_prefs` table migration (with defaults)
-- [ ] `notification_log` table migration
-- [ ] `broadcast_to_merchant()` in `websocket_broadcast.py`
-- [ ] `GET/PATCH /merchants/me/notifications` endpoints
-- [ ] `GET/PATCH /merchants/me/notification-prefs` endpoints
-- [ ] `PATCH /merchants/me/push-token` endpoint
-- [ ] `app/services/push_service.py` — Expo Push API
-- [ ] `app/services/notification_service.py` — central dispatcher
-- [ ] Wire `notify_merchant()` into `webhooks.py`, `admin.py`, `kyc.py`
-- [ ] `merchants` table: add `expo_push_token`, `push_enabled` columns
+- [x] `notifications` table migration (023)
+- [x] `notification_prefs` table migration (023)
+- [x] `push_tokens` table migration (024) — multi-device support
+- [x] `broadcast_to_merchant()` in `websocket_broadcast.py`
+- [x] `GET/PATCH /merchants/me/notifications` endpoints
+- [x] `GET/PATCH /merchants/me/notification-prefs` endpoints
+- [x] `PATCH /merchants/me/push-token` endpoint
+- [x] `DELETE /merchants/me/push-token` endpoint (device-specific)
+- [x] `app/services/push_service.py` — Expo Push API + `send_push_to_merchant()` for multi-device
+- [x] Wire `notify_merchant()` into `webhooks.py`, `admin.py`, `kyc.py`
+- [x] `merchants` table: `push_enabled` column (023)
 
 **scan2pay-app:**
-- [ ] `expo-notifications` plugin in `app.json`
-- [ ] Permission request flow (post-login, not cold start)
-- [ ] Push token registration on login, deregistration on logout
-- [ ] Bell icon with unread badge in `AppShell.tsx`
-- [ ] Notification drawer/panel component
-- [ ] Notification preferences section in `settings.tsx`
-- [ ] WebSocket handler for `NOTIFICATION` message type
+- [x] `expo-notifications` plugin in `app.json`
+- [x] Android package name fixed to `com.vulapay.app` (matches `google-services.json`)
+- [x] Permission request flow (post-login, not cold start)
+- [x] Push token registration on login, deregistration on logout (device-specific)
+- [x] Bell icon with unread badge in `AppShell.tsx`
+- [x] Notification drawer/panel component
+- [x] Notification preferences section in `settings.tsx` — push + SMS live, WhatsApp/Email coming soon
+- [x] WebSocket handler for `NOTIFICATION` message type
 
 **scan2pay-web:**
-- [ ] Bell icon with unread badge in `AppShell.tsx`
-- [ ] Notification panel component
-- [ ] `/settings/notifications` page
-- [ ] WebSocket handler for `NOTIFICATION` message type
+- [x] Bell icon with unread badge in `AppShell.tsx`
+- [x] Notification panel component
+- [x] Notification preferences in `settings/page.tsx` — SMS live, push app-only badge, WhatsApp/Email coming soon
+- [x] WebSocket handler for `NOTIFICATION` message type
 
 ---
 
 ### Phase 2 — SMS digest + WhatsApp digest
 
 **Backend:**
+- [x] SMS instant notifications wired into `webhooks.py`, `admin.py`, `kyc.py`
 - [ ] `app/cron/send_daily_digest.py` — Lambda handler
 - [ ] `template.yaml` — `SendDailyDigestFunction` at `cron(0 17 * * ? *)`
 - [ ] `template.yaml` — SES IAM permission on digest function
@@ -550,7 +552,7 @@ This replaces the scattered `send_sms()` calls in `admin.py`, `kyc.py`, and
 - [ ] Update `notify_merchant()` to skip SMS/WhatsApp for digest-mode merchants
 
 **Meta:**
-- [ ] Submit `vulapay_daily_summary` template for approval
+- [ ] Submit `vulapay_daily_summary` template for approval (waiting for WhatsApp approval)
 
 **AWS SES:**
 - [ ] Verify `vula-pay.co.za` domain in SES

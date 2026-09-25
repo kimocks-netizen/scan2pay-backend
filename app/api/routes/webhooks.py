@@ -46,7 +46,7 @@ async def paystack_webhook(request: Request):
     # ── charge.success ────────────────────────────────────────────────────────
     if event == "charge.success":
         try:
-            _handle_charge_success(data, db)
+            await _handle_charge_success(data, db)
         except Exception:
             logger.exception("Error handling charge.success for ref %s", provider_reference)
 
@@ -63,13 +63,13 @@ async def paystack_webhook(request: Request):
     return {"received": True}
 
 
-def _handle_charge_success(data: dict, db) -> None:
+async def _handle_charge_success(data: dict, db) -> None:
     reference = data.get("reference")
     if not reference:
         logger.warning("charge.success missing reference")
         return
 
-    txn_res = db.table("transactions").select("id, status, payment_code_id").eq("paystack_reference", reference).execute()
+    txn_res = db.table("transactions").select("id, status, payment_code_id, merchant_id").eq("paystack_reference", reference).execute()
     if not txn_res.data:
         logger.warning("charge.success: no transaction found for reference %s", reference)
         return
@@ -99,13 +99,16 @@ def _handle_charge_success(data: dict, db) -> None:
     db.table("transactions").update(updates).eq("id", txn["id"]).execute()
 
     # push real-time update to any waiting WebSocket connection
-    from app.services.websocket_broadcast import broadcast_to_txn
+    from app.services.websocket_broadcast import broadcast_to_txn, broadcast_to_merchant
     broadcast_to_txn(txn["id"], {
         "type": "PAYMENT_SUCCESS",
         "txn_id": txn["id"],
         "amount_cents": data.get("amount"),
         "paid_at": updates.get("paid_at"),
     })
+
+    # notify merchant — bell + push + SMS
+    await _notify_payment(txn, data, db)
 
     # deactivate single-use payment code
     if single_use:
@@ -117,6 +120,64 @@ def _handle_charge_success(data: dict, db) -> None:
     db.table("payment_codes").update({"payments": current + 1}).eq("id", txn["payment_code_id"]).execute()
 
     logger.info("charge.success processed: txn=%s reference=%s", txn["id"], reference)
+
+
+async def _notify_payment(txn: dict, data: dict, db) -> None:
+    """Bell + push + SMS for payment_received. Non-fatal — never raises."""
+    try:
+        amount_cents = data.get("amount", 0)
+        amount_str = f"R{amount_cents / 100:.2f}"
+        title = "Payment received"
+        body = f"{amount_str} received"
+
+        # look up merchant
+        m_res = db.table("merchants").select("id,user_id,expo_push_token,push_enabled").eq("id", txn.get("merchant_id", "")).execute()
+        if not m_res.data:
+            return
+        merchant = m_res.data[0]
+        mid = merchant["id"]
+
+        # bell — write notification row
+        import secrets as _s
+        from datetime import datetime, timezone
+        db.table("notifications").insert({
+            "id": f"notif_{_s.token_hex(8)}",
+            "merchant_id": mid,
+            "type": "payment_received",
+            "title": title,
+            "body": body,
+            "data": {"txn_id": txn["id"], "amount_cents": amount_cents},
+        }).execute()
+
+        # bell — WebSocket broadcast
+        from app.services.websocket_broadcast import broadcast_to_merchant
+        broadcast_to_merchant(mid, {
+            "type": "NOTIFICATION",
+            "notification": {"type": "payment_received", "title": title, "body": body,
+                             "data": {"txn_id": txn["id"], "amount_cents": amount_cents},
+                             "created_at": datetime.now(timezone.utc).isoformat()},
+        })
+
+        # check prefs
+        prefs_res = db.table("notification_prefs").select("payments_push,payments_sms,payments_sms_mode").eq("merchant_id", mid).execute()
+        prefs = prefs_res.data[0] if prefs_res.data else {}
+        push_on = prefs.get("payments_push", True)
+        sms_on = prefs.get("payments_sms", True)
+        sms_mode = prefs.get("payments_sms_mode", "instant")
+
+        # push — all devices
+        if push_on:
+            from app.services.push_service import send_push_to_merchant
+            await send_push_to_merchant(mid, title, body, {"txn_id": txn["id"], "amount_cents": amount_cents}, db)
+
+        # SMS — only if instant mode
+        if sms_on and sms_mode == "instant":
+            usr = db.table("users").select("phone").eq("id", merchant["user_id"]).execute()
+            if usr.data:
+                from app.services.sms_service import send_sms
+                await send_sms(usr.data[0]["phone"], f"VulaPay: {body}")
+    except Exception as e:
+        logger.error("_notify_payment failed: %s", e)
 
 
 def _handle_transfer_event(event: str, data: dict, db) -> None:

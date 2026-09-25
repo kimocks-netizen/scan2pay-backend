@@ -244,22 +244,52 @@ async def review_kyc_document(
         "kyc_verified_at": now if kyc_status == "verified" else None,
     }).eq("id", merchant_id).execute()
 
-    # SMS notification to merchant
-    user_res = db.table("users").select("phone").eq(
-        "id",
-        db.table("merchants").select("user_id").eq("id", merchant_id).execute().data[0]["user_id"]
-    ).execute()
-    if user_res.data:
-        phone = user_res.data[0]["phone"]
-        if kyc_status == "verified":
-            msg = "Your VulaPay KYC verification is complete. Your account is now fully verified and withdrawal limits have been lifted."
-        elif kyc_status == "failed":
-            reason = body.rejection_reason or "Please resubmit the required documents."
-            msg = f"Your VulaPay KYC document was rejected. Reason: {reason} Please log in to resubmit."
-        else:
-            msg = None
-        if msg:
-            await send_sms(phone, msg)
+    # Bell + push + SMS notification to merchant
+    mch_res = db.table("merchants").select("id,user_id,expo_push_token,push_enabled").eq("id", merchant_id).execute()
+    if mch_res.data:
+        merchant = mch_res.data[0]
+        user_res = db.table("users").select("phone").eq("id", merchant["user_id"]).execute()
+        if user_res.data:
+            phone = user_res.data[0]["phone"]
+            if kyc_status == "verified":
+                title = "KYC approved"
+                msg = "Your VulaPay KYC verification is complete. Your account is now fully verified."
+                notif_type = "kyc_approved"
+            elif kyc_status == "failed":
+                reason = body.rejection_reason or "Please resubmit the required documents."
+                title = "KYC rejected"
+                msg = f"Your VulaPay KYC document was rejected. Reason: {reason}"
+                notif_type = "kyc_rejected"
+            else:
+                title = msg = notif_type = None
+
+            if title and msg and notif_type:
+                import secrets as _s
+                from datetime import datetime, timezone
+                db.table("notifications").insert({
+                    "id": f"notif_{_s.token_hex(8)}",
+                    "merchant_id": merchant["id"],
+                    "type": notif_type,
+                    "title": title,
+                    "body": msg,
+                    "data": {"doc_id": doc_id},
+                }).execute()
+
+                from app.services.websocket_broadcast import broadcast_to_merchant
+                broadcast_to_merchant(merchant["id"], {
+                    "type": "NOTIFICATION",
+                    "notification": {"type": notif_type, "title": title, "body": msg,
+                                     "data": {"doc_id": doc_id},
+                                     "created_at": datetime.now(timezone.utc).isoformat()},
+                })
+
+                prefs_res = db.table("notification_prefs").select("events_push").eq("merchant_id", merchant["id"]).execute()
+                push_on = (prefs_res.data[0].get("events_push", True) if prefs_res.data else True)
+                if push_on:
+                    from app.services.push_service import send_push_to_merchant
+                    await send_push_to_merchant(merchant["id"], title, msg, {"doc_id": doc_id}, db)
+
+                await send_sms(phone, f"VulaPay: {msg}")
 
     log_admin_action(
         staff_id, f"kyc.{body.status}", "merchant_document", doc_id,

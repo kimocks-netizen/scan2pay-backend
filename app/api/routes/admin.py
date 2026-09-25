@@ -638,17 +638,53 @@ async def update_withdrawal_status(
 
     async def _notify_merchant(status: str):
         try:
-            mch = db.table("merchants").select("user_id").eq("id", wd["merchant_id"]).execute()
+            mch = db.table("merchants").select("id,user_id,expo_push_token,push_enabled").eq("id", wd["merchant_id"]).execute()
             if not mch.data: return
-            usr = db.table("users").select("phone").eq("id", mch.data[0]["user_id"]).execute()
+            merchant = mch.data[0]
+            mid = merchant["id"]
+            usr = db.table("users").select("phone").eq("id", merchant["user_id"]).execute()
             if not usr.data: return
             amount = f"R{wd['amount_cents'] / 100:.2f}"
             if status == "approved":
-                msg = f"Your VulaPay withdrawal of {amount} has been approved and is being processed to your bank account."
+                title = "Withdrawal approved"
+                body_text = f"Your withdrawal of {amount} has been approved and is being processed."
+                notif_type = "withdrawal_approved"
             else:
                 reason = body.reason or "Please contact support for more information."
-                msg = f"Your VulaPay withdrawal of {amount} was declined. Reason: {reason}"
-            await send_sms(usr.data[0]["phone"], msg)
+                title = "Withdrawal declined"
+                body_text = f"Your withdrawal of {amount} was declined. {reason}"
+                notif_type = "withdrawal_rejected"
+
+            # bell
+            import secrets as _s
+            db.table("notifications").insert({
+                "id": f"notif_{_s.token_hex(8)}",
+                "merchant_id": mid,
+                "type": notif_type,
+                "title": title,
+                "body": body_text,
+                "data": {"withdrawal_id": wd["id"], "amount_cents": wd["amount_cents"]},
+            }).execute()
+
+            from app.services.websocket_broadcast import broadcast_to_merchant
+            from datetime import datetime, timezone
+            broadcast_to_merchant(mid, {
+                "type": "NOTIFICATION",
+                "notification": {"type": notif_type, "title": title, "body": body_text,
+                                 "data": {"withdrawal_id": wd["id"]},
+                                 "created_at": datetime.now(timezone.utc).isoformat()},
+            })
+
+            # push — all devices
+            token = merchant.get("expo_push_token")
+            prefs_res = db.table("notification_prefs").select("events_push").eq("merchant_id", mid).execute()
+            push_on = (prefs_res.data[0].get("events_push", True) if prefs_res.data else True)
+            if push_on:
+                from app.services.push_service import send_push_to_merchant
+                await send_push_to_merchant(mid, title, body_text, {"withdrawal_id": wd["id"]}, db)
+
+            # SMS — always for withdrawal decisions
+            await send_sms(usr.data[0]["phone"], f"VulaPay: {body_text}")
         except Exception:
             pass  # non-fatal
 

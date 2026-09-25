@@ -31,6 +31,36 @@ def _get_apigw():
     return _apigw
 
 
+def broadcast_to_merchant(merchant_id: str, message: dict) -> None:
+    """Push a message to all WebSocket connections for a merchant."""
+    settings = get_settings()
+    if not settings.websocket_endpoint or not settings.ws_connections_table:
+        return
+    try:
+        table = _get_dynamodb().Table(settings.ws_connections_table)
+        result = table.query(
+            IndexName="merchant_id-index",
+            KeyConditionExpression="merchant_id = :mid",
+            ExpressionAttributeValues={":mid": merchant_id},
+        )
+        connections = result.get("Items", [])
+        if not connections:
+            return
+        payload = json.dumps(message).encode()
+        apigw = _get_apigw()
+        for conn in connections:
+            connection_id = conn["connectionId"]
+            try:
+                apigw.post_to_connection(ConnectionId=connection_id, Data=payload)
+            except ClientError as e:
+                if e.response["Error"]["Code"] == "GoneException":
+                    table.delete_item(Key={"connectionId": connection_id})
+                else:
+                    logger.warning("ws: post_to_connection error: %s", e)
+    except Exception as e:
+        logger.error("ws: broadcast_to_merchant failed: %s", e)
+
+
 def broadcast_to_txn(txn_id: str, message: dict) -> None:
     """Push a message to all WebSocket connections waiting on txn_id."""
     settings = get_settings()

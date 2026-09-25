@@ -48,16 +48,26 @@ class ReferralUpdate(BaseModel):
     referral_code: str
 
 
+class PushTokenUpdate(BaseModel):
+    token: str = Field(..., max_length=200)
+
+
+class NotificationPrefsUpdate(BaseModel):
+    payments_push: bool | None = None
+    payments_sms: bool | None = None
+    payments_sms_mode: str | None = None
+    events_push: bool | None = None
+    events_sms: bool | None = None
+
+
 # ── /me routes (must be before /{merchant_id} wildcard) ──────────────────────
 
 @router.patch("/me/referral")
 async def set_referral(body: ReferralUpdate, user_id: str = Depends(get_current_user_id)):
     db = get_db()
     merchant = _get_merchant(user_id, db)
-    # Only set if not already referred
     if merchant.get("referred_by"):
         return {"referred_by": merchant["referred_by"]}
-    # Validate the code is a real user
     ref = db.table("users").select("id").eq("id", body.referral_code).execute()
     if not ref.data:
         raise HTTPException(status_code=422, detail={"code": "invalid_referral", "message": "Invalid referral code."})
@@ -82,19 +92,80 @@ async def update_my_merchant(body: MerchantUpdate, user_id: str = Depends(get_cu
     return res.data[0]
 
 
+# ── Push token ────────────────────────────────────────────────────────────────
+
+@router.patch("/me/push-token")
+async def register_push_token(body: PushTokenUpdate, user_id: str = Depends(get_current_user_id)):
+    db = get_db()
+    merchant = _get_merchant(user_id, db)
+    import secrets as _s
+    # upsert — UNIQUE(merchant_id, token) means duplicate is a no-op
+    db.table("push_tokens").upsert({
+        "id": f"pt_{_s.token_hex(8)}",
+        "merchant_id": merchant["id"],
+        "token": body.token,
+    }, on_conflict="merchant_id,token").execute()
+    return {"registered": True}
+
+
+@router.delete("/me/push-token")
+async def deregister_push_token(body: PushTokenUpdate, user_id: str = Depends(get_current_user_id)):
+    """Remove only this device's token — other devices keep receiving push."""
+    db = get_db()
+    merchant = _get_merchant(user_id, db)
+    db.table("push_tokens").delete().eq("merchant_id", merchant["id"]).eq("token", body.token).execute()
+    return {"registered": False}
+
+
+# ── Notification prefs ────────────────────────────────────────────────────────
+
+@router.get("/me/notification-prefs")
+async def get_notification_prefs(user_id: str = Depends(get_current_user_id)):
+    db = get_db()
+    merchant = _get_merchant(user_id, db)
+    res = db.table("notification_prefs").select("*").eq("merchant_id", merchant["id"]).execute()
+    if not res.data:
+        # return defaults if row doesn't exist yet
+        return {
+            "merchant_id": merchant["id"],
+            "payments_push": True,
+            "payments_sms": True,
+            "payments_sms_mode": "instant",
+            "events_push": True,
+            "events_sms": True,
+        }
+    return res.data[0]
+
+
+@router.patch("/me/notification-prefs")
+async def update_notification_prefs(body: NotificationPrefsUpdate, user_id: str = Depends(get_current_user_id)):
+    db = get_db()
+    merchant = _get_merchant(user_id, db)
+    mid = merchant["id"]
+    updates = body.model_dump(exclude_none=True)
+    if not updates:
+        return await get_notification_prefs(user_id)
+
+    if "payments_sms_mode" in updates and updates["payments_sms_mode"] not in ("instant", "digest"):
+        raise HTTPException(status_code=422, detail={"code": "invalid_mode", "message": "payments_sms_mode must be instant or digest"})
+
+    updates["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    existing = db.table("notification_prefs").select("merchant_id").eq("merchant_id", mid).execute()
+    if existing.data:
+        res = db.table("notification_prefs").update(updates).eq("merchant_id", mid).execute()
+    else:
+        res = db.table("notification_prefs").insert({"merchant_id": mid, **updates}).execute()
+    return res.data[0]
+
+
 @router.patch("/me/payout-account")
 async def save_payout_account(body: PayoutAccountRequest, user_id: str = Depends(get_current_user_id)):
-    """
-    1. In prod: KYC via POST /bank/validate — reject if not verified.
-    2. Create Paystack transfer recipient.
-    3. Save bank details + recipient code on merchant.
-    """
     db = get_db()
     merchant = _get_merchant(user_id, db)
     mid = merchant["id"]
     is_prod = settings.environment == "prod"
 
-    # ── Step 1: Paystack bank validation (both envs — blocks in prod, informational in test) ──
     if body.id_number:
         try:
             kyc = validate_bank_account(
@@ -105,7 +176,6 @@ async def save_payout_account(body: PayoutAccountRequest, user_id: str = Depends
                 account_type="personal",
                 document_type=body.document_type,
             )
-            # Always store result so admin sees it in KYC queue
             db.table("merchants").update({
                 "bank_verified":         kyc.get("verified", False),
                 "bank_holder_match":     kyc.get("accountHolderMatch", False),
@@ -116,7 +186,6 @@ async def save_payout_account(body: PayoutAccountRequest, user_id: str = Depends
                 "bank_validated_at":     datetime.now(timezone.utc).isoformat(),
             }).eq("id", mid).execute()
 
-            # Only block in prod — test mode always returns verified=false
             if is_prod:
                 if not kyc.get("verified"):
                     db.table("merchants").update({"kyc_status": "failed"}).eq("id", mid).execute()
@@ -132,8 +201,6 @@ async def save_payout_account(body: PayoutAccountRequest, user_id: str = Depends
         except PaystackError as e:
             if is_prod:
                 raise HTTPException(status_code=502, detail={"code": e.code, "message": e.message})
-            # Test mode — Paystack blocked the call (e.g. passport in test, ZAR unsupported)
-            # Store a placeholder so admin knows validation was attempted but blocked
             db.table("merchants").update({
                 "bank_verified":         False,
                 "bank_holder_match":     None,
@@ -146,7 +213,6 @@ async def save_payout_account(body: PayoutAccountRequest, user_id: str = Depends
     elif is_prod:
         raise HTTPException(status_code=422, detail={"code": "id_required", "message": "ID or passport number is required."})
 
-    # ── Step 2: Create Paystack recipient ─────────────────────────────────────
     try:
         recipient = create_transfer_recipient(
             name=body.account_holder,
@@ -159,21 +225,19 @@ async def save_payout_account(body: PayoutAccountRequest, user_id: str = Depends
     bank_name = recipient.get("details", {}).get("bank_name", "")
     masked = f"**** {body.account_number[-4:]}"
 
-    # ── Step 3: Invalidate old KYC docs — bank changed, docs must be re-verified
     existing_docs = db.table("merchant_documents").select("id,s3_key").eq("merchant_id", mid).execute()
     for doc in (existing_docs.data or []):
         from app.services.s3_service import delete_object
         delete_object(doc["s3_key"])
     db.table("merchant_documents").delete().eq("merchant_id", mid).execute()
 
-    # ── Step 4: Persist ───────────────────────────────────────────────────────
     updates: dict = {
         "payout_bank": bank_name,
         "payout_bank_code": body.bank_code,
         "payout_account_masked": masked,
         "payout_account_name": body.account_holder,
         "paystack_recipient_code": recipient["recipient_code"],
-        "kyc_status": "verified" if is_prod else "pending",  # prod: Paystack validated; test: needs doc re-upload
+        "kyc_status": "verified" if is_prod else "pending",
     }
     if is_prod:
         updates["kyc_verified_at"] = datetime.now(timezone.utc).isoformat()
@@ -193,12 +257,6 @@ async def save_payout_account(body: PayoutAccountRequest, user_id: str = Depends
 
 @router.get("/me/balance")
 async def get_my_balance(user_id: str = Depends(get_current_user_id)):
-    """
-    available_cents          = settled net_cents - in-flight withdrawals
-    pending_settlement_cents = earned but not yet settled by cron
-    in_flight_cents          = pending + approved withdrawal amounts
-    withdrawn_cents          = total paid withdrawals
-    """
     db = get_db()
     merchant = _get_merchant(user_id, db)
     mid = merchant["id"]
@@ -227,23 +285,10 @@ async def get_my_balance(user_id: str = Depends(get_current_user_id)):
     }
 
 
-# ── Account deletion (self-service, archive-only) ─────────────────────────────
-#
-# We never hard-delete on request. Eligible only when there's nothing left
-# outstanding in either direction; otherwise the merchant is told exactly
-# why not. Reactivation happens automatically if they ever register again
-# with the same phone/email (see auth.py) — see migration 018 for the
-# archived-then-never-returned purge that runs after 90 days.
+# ── Account deletion ──────────────────────────────────────────────────────────
 
 def _archive_eligibility(merchant_id: str, db) -> list[dict]:
-    """
-    Returns structured blockers, not pre-formatted strings — the frontend
-    renders amounts bold/colour-coded by `type`, which it can only do
-    reliably from structured facts, not by parsing sentences.
-    Empty list = eligible.
-    """
     reasons = []
-
     pending = db.table("transactions").select("id", count="exact") \
         .eq("merchant_id", merchant_id).eq("status", "pending").execute()
     if (pending.count or 0) > 0:

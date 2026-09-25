@@ -52,7 +52,7 @@ def initialize_transaction(
                 "amount": amount_cents,
                 "currency": "ZAR",
                 "reference": reference,
-                "callback_url": "http://app.vula-pay.co.za/success",
+                "callback_url": "https://app.vula-pay.co.za/success",
                 # TODO: add "apple_pay", "google_pay", "capitec_pay" once configured:
                 #   - Apple Pay: register scan2pay.site domain via POST /apple-pay/domain before go-live
                 #   - Google Pay: enabled automatically by Paystack once account is verified
